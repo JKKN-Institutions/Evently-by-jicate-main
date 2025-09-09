@@ -29,6 +29,13 @@ interface PredefinedTicket {
 export default function PredefinedTicketsPage() {
   const { user, profile, loading: authLoading } = useAuth()
   const router = useRouter()
+  const [mounted, setMounted] = useState(false)
+  
+  // Ensure we're on the client side
+  useEffect(() => {
+    setMounted(true)
+    console.log('🎯 PredefinedTicketsPage mounted on client')
+  }, [])
   
   // Derive effective role - same logic as professional-sidebar
   const effectiveRole = profile?.role || (user?.email && isAdminEmail(user.email) ? 'admin' : 'user')
@@ -72,37 +79,102 @@ export default function PredefinedTicketsPage() {
   const supabase = createClient()
 
   useEffect(() => {
-    if (authLoading) return
+    console.log('🔍 PredefinedTickets useEffect triggered', { authLoading, isAdmin, user: user?.email, mounted })
+    
+    // Don't run on server side
+    if (!mounted) return
+    
+    // Aggressive timeout to prevent any hanging
+    const aggressiveTimeout = setTimeout(() => {
+      console.warn('🚨 AGGRESSIVE TIMEOUT: Forcing page to render after 2 seconds')
+      setLoading(false)
+      // Ensure we have empty arrays if nothing loaded
+      setTickets(prev => prev.length > 0 ? prev : [])
+      setEvents(prev => prev.length > 0 ? prev : [])
+    }, 2000) // Very aggressive 2 second timeout
+    
+    if (authLoading) {
+      console.log('⏳ Still waiting for auth to load...')
+      // Don't wait forever for auth
+      const authTimeout = setTimeout(() => {
+        console.warn('⚠️ Auth loading timeout, assuming not admin')
+        router.replace('/')
+      }, 3000)
+      
+      return () => {
+        clearTimeout(authTimeout)
+        clearTimeout(aggressiveTimeout)
+      }
+    }
+    
     if (!isAdmin) {
+      console.log('🚫 User is not admin, redirecting to home')
+      clearTimeout(aggressiveTimeout)
       router.replace('/')
       return
     }
     
     const loadData = async () => {
-      setLoading(true)
+      console.log('📊 Starting data load for predefined tickets page')
+      
+      // Don't set loading to true if we're already past the timeout
+      if (!loading) return
+      
       try {
-        // Load both in parallel but don't let one hang the other
-        await Promise.allSettled([
-          loadTickets(),
-          loadEvents()
+        // Load both in parallel with individual error handling
+        console.log('🚀 Starting parallel data fetch...')
+        const [ticketsResult, eventsResult] = await Promise.allSettled([
+          loadTickets().catch(err => {
+            console.error('loadTickets error:', err)
+            return null
+          }),
+          loadEvents().catch(err => {
+            console.error('loadEvents error:', err)  
+            return null
+          })
         ])
+        
+        console.log('📦 Data fetch completed:', {
+          tickets: ticketsResult.status,
+          events: eventsResult.status
+        })
       } catch (error) {
-        console.error('Error loading data:', error)
+        console.error('💥 Critical error loading data:', error)
       } finally {
+        console.log('✨ Data loading complete')
         setLoading(false)
+        clearTimeout(aggressiveTimeout)
       }
     }
     
     loadData()
-  }, [authLoading, isAdmin])
+    
+    return () => {
+      clearTimeout(aggressiveTimeout)
+    }
+  }, [authLoading, isAdmin, mounted])
 
-  // Early return for non-admin users or while loading
+  // Early return for SSR or non-admin users
+  if (!mounted) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="mt-4 text-gray-600">Initializing...</p>
+        </div>
+      </div>
+    )
+  }
+  
   if (authLoading || !isAdmin) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">{authLoading ? 'Checking permissions...' : 'Admin access required'}</p>
+          {authLoading && (
+            <p className="text-xs text-gray-500 mt-2">Taking too long? Try refreshing the page.</p>
+          )}
         </div>
       </div>
     )
@@ -120,42 +192,55 @@ export default function PredefinedTicketsPage() {
         return
       }
       
-      // Add timeout to prevent hanging (5 second timeout)
-      const timeout = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Database query timeout after 5 seconds')), 5000)
-      )
+      // Shorter timeout in production for better UX
+      const timeoutMs = process.env.NODE_ENV === 'production' ? 2000 : 3000
       
+      // Create timeout promise
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+          console.warn(`Events query timed out after ${timeoutMs}ms`)
+          resolve({ data: null, error: new Error('Query timeout') })
+        }, timeoutMs)
+      })
+      
+      // Create query promise
       const queryPromise = supabase
         .from('events')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      // Race between query and timeout
+      const result = await Promise.race([queryPromise, timeoutPromise]) as any
 
-      const { data, error } = await Promise.race([queryPromise, timeout])
-
-      if (error) {
-        console.error('Error loading events:', error)
-        console.error('Error details:', {
-          message: error.message,
-          details: error.details,
-          hint: error.hint,
-          code: error.code
-        })
+      if (result.error) {
+        console.error('Error loading events:', result.error)
         
-        // Check specific error types
-        if (error.code === '42P01' || error.message?.includes('relation')) {
-          console.error('Events table not found - Please check if table exists in Supabase')
-        } else if (error.code === '42501' || error.message?.includes('permission denied')) {
-          console.error('Permission denied - Check RLS policies. Run fix-events-access.sql')
+        if (result.error.message === 'Query timeout') {
+          console.warn('Events loading timed out - continuing without events')
+        } else {
+          console.error('Error details:', {
+            message: result.error.message,
+            details: result.error.details,
+            hint: result.error.hint,
+            code: result.error.code
+          })
+          
+          // Check specific error types
+          if (result.error.code === '42P01' || result.error.message?.includes('relation')) {
+            console.error('Events table not found - Please check if table exists in Supabase')
+          } else if (result.error.code === '42501' || result.error.message?.includes('permission denied')) {
+            console.error('Permission denied - Check RLS policies. Run fix-events-access.sql')
+          }
         }
         setEvents([])
-      } else if (data) {
-        console.log(`Successfully loaded ${data.length} events:`, data)
-        setEvents(data)
+      } else if (result.data) {
+        console.log(`Successfully loaded ${result.data.length} events:`, result.data)
+        setEvents(result.data)
         
         // If there are events but none selected, auto-select the first one
-        if (data.length > 0 && !selectedEventId) {
-          setSelectedEventId(data[0].id)
-          console.log('Auto-selected first event:', data[0].title)
+        if (result.data.length > 0 && !selectedEventId) {
+          setSelectedEventId(result.data[0].id)
+          console.log('Auto-selected first event:', result.data[0].title)
         }
       } else {
         console.log('No events found in database')
@@ -170,32 +255,54 @@ export default function PredefinedTicketsPage() {
   const loadTickets = async () => {
     try {
       console.log('Loading predefined tickets from database...')
-      const { data, error } = await supabase
+      
+      // Shorter timeout in production for better UX
+      const timeoutMs = process.env.NODE_ENV === 'production' ? 2000 : 3000
+      
+      // Create timeout promise
+      const timeoutPromise = new Promise((resolve) => {
+        setTimeout(() => {
+          console.warn(`Tickets query timed out after ${timeoutMs}ms`)
+          resolve({ data: null, error: new Error('Query timeout') })
+        }, timeoutMs)
+      })
+      
+      // Create query promise
+      const queryPromise = supabase
         .from('predefined_tickets')
         .select('*')
         .order('created_at', { ascending: false })
+      
+      // Race between query and timeout
+      const result = await Promise.race([queryPromise, timeoutPromise]) as any
 
-      if (error) {
-        console.error('Error loading tickets:', error)
-        // Check if table doesn't exist
-        if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+      if (result.error) {
+        console.error('Error loading tickets:', result.error)
+        
+        if (result.error.message === 'Query timeout') {
+          console.warn('Tickets loading timed out - continuing without tickets')
+          setDbError('Loading timed out. The page will continue to work but some features may be limited.')
+        } else if (result.error.code === '42P01' || result.error.message?.includes('relation') || result.error.message?.includes('does not exist')) {
           console.error('The predefined_tickets table does not exist. Please run the setup SQL script.')
           setDbError('Database table not found. Please run the SETUP-PREDEFINED-TICKETS.sql script in your Supabase SQL Editor.')
+        } else {
+          console.error('Failed to load ticket templates:', result.error.message)
+          setDbError('Failed to load ticket templates. Please check your database connection.')
         }
-        throw error
-      }
-      console.log(`Successfully loaded ${data?.length || 0} predefined tickets`)
-      setTickets(data || [])
-      setDbError(null)
-    } catch (error: any) {
-      console.error('Error loading tickets:', error)
-      // Show user-friendly error message
-      if (error?.code === '42P01' || error?.message?.includes('relation') || error?.message?.includes('does not exist')) {
-        // Table doesn't exist error is handled above
+        setTickets([])
+      } else if (result.data) {
+        console.log(`Successfully loaded ${result.data.length} predefined tickets`)
+        setTickets(result.data)
+        setDbError(null)
       } else {
-        console.error('Failed to load ticket templates. Please check your database connection.')
-        setDbError('Failed to load ticket templates. Please check your database connection.')
+        console.log('No tickets found')
+        setTickets([])
+        setDbError(null)
       }
+    } catch (error: any) {
+      console.error('Unexpected error loading tickets:', error)
+      setTickets([])
+      setDbError('Failed to load ticket templates. Please try refreshing the page.')
     }
   }
 
@@ -894,8 +1001,12 @@ export default function PredefinedTicketsPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0b6d41]"></div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#0b6d41] mx-auto"></div>
+          <p className="mt-4 text-gray-600">Loading templates...</p>
+          <p className="text-xs text-gray-500 mt-2">If this takes too long, the page will load anyway</p>
+        </div>
       </div>
     )
   }
