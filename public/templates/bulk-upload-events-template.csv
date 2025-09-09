@@ -1,0 +1,11 @@
+title,description,date,time,venue,location,category,price,max_attendees,status
+Tech Conference 2024,Annual technology conference with keynote speakers,2024-12-15,09:00,Convention Center,123 Main St City,Technology,299,500,published
+Music Festival,Live performances from local bands,2024-12-20,18:00,Open Air Theatre,Park Avenue,Music,150,1000,published
+Food Expo,Culinary exhibitions and tastings,2024-12-22,11:00,Exhibition Hall,Downtown Plaza,Food,50,300,published
+Art Workshop,Hands-on painting workshop for beginners,2024-12-25,14:00,Art Studio,Creative Quarter,Art,75,30,draft
+Business Summit,Networking event for entrepreneurs,2024-12-28,10:00,Business Center,Financial District,Business,199,200,published
+Sports Tournament,Basketball championship finals,2024-12-30,16:00,Sports Arena,Stadium Road,Sports,25,2000,published
+Photography Exhibition,Showcase of contemporary photography,2025-01-05,12:00,Gallery Space,Arts District,Exhibition,0,100,published
+Coding Bootcamp,Intensive programming workshop,2025-01-10,09:00,Tech Hub,Innovation Park,Workshop,399,50,draft
+Comedy Night,Stand-up comedy show,2025-01-12,20:00,Comedy Club,Entertainment Zone,Entertainment,80,150,published
+Health & Wellness Expo,Fitness and wellness workshops,2025-01-15,10:00,Wellness Center,Health Complex,Health,0,400,published

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Database Connection</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        pre {
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <h1>Database Connection Test</h1>
+    
+    <div id="status"></div>
+    <div id="results"></div>
+    
+    <div style="margin-top: 20px;">
+        <button onclick="testEvents()">Test Events Table</button>
+        <button onclick="testPredefinedTickets()">Test Predefined Tickets</button>
+        <button onclick="testTickets()">Test Tickets Table</button>
+        <button onclick="runFixScript()">Run Fix Script</button>
+    </div>
+
+    <script>
+        // Initialize Supabase client
+        const supabaseUrl = 'https://sdkdimqmzunfmyawtqfy.supabase.co';
+        const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNka2RpbXFtenVuZm15YXd0cWZ5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTU3NzE1MjEsImV4cCI6MjA3MTM0NzUyMX0.kvtG_u9zyK4N9X4vEpcntDdL8Bj2W2v3MvL5fyuOmGg';
+        const supabase = supabase.createClient(supabaseUrl, supabaseKey);
+
+        function log(message, type = 'info') {
+            const results = document.getElementById('results');
+            const div = document.createElement('div');
+            div.className = type;
+            div.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong>: ${message}`;
+            results.appendChild(div);
+        }
+
+        async function testEvents() {
+            log('Testing events table...');
+            
+            try {
+                // First, try to get table structure
+                const { data: columns, error: structureError } = await supabase
+                    .rpc('get_table_columns', { table_name: 'events' })
+                    .limit(1);
+                
+                if (structureError) {
+                    log(`Table structure query failed: ${structureError.message}`, 'error');
+                }
+
+                // Try to select from events
+                const { data, error, count } = await supabase
+                    .from('events')
+                    .select('*', { count: 'exact' })
+                    .limit(5);
+                
+                if (error) {
+                    log(`Events query error: ${error.message}`, 'error');
+                    log(`Error code: ${error.code}`, 'error');
+                    
+                    // Check if it's a missing column error
+                    if (error.message.includes('column')) {
+                        log('Column mismatch detected. Listing actual columns...', 'info');
+                        
+                        // Try with minimal columns
+                        const { data: minData, error: minError } = await supabase
+                            .from('events')
+                            .select('id, title, created_at')
+                            .limit(1);
+                        
+                        if (!minError && minData) {
+                            log('Basic columns work. Full record structure:', 'success');
+                            log(`<pre>${JSON.stringify(minData[0], null, 2)}</pre>`, 'info');
+                        }
+                    }
+                } else {
+                    log(`Found ${count || data?.length || 0} events`, 'success');
+                    if (data && data.length > 0) {
+                        log('First event structure:', 'info');
+                        log(`<pre>${JSON.stringify(data[0], null, 2)}</pre>`, 'info');
+                    }
+                }
+            } catch (err) {
+                log(`Unexpected error: ${err.message}`, 'error');
+            }
+        }
+
+        async function testPredefinedTickets() {
+            log('Testing predefined_tickets table...');
+            
+            try {
+                const { data, error, count } = await supabase
+                    .from('predefined_tickets')
+                    .select('*', { count: 'exact' })
+                    .limit(5);
+                
+                if (error) {
+                    log(`Predefined tickets error: ${error.message}`, 'error');
+                    
+                    if (error.code === '42P01') {
+                        log('Table does not exist. Please run the setup SQL script.', 'error');
+                    }
+                } else {
+                    log(`Found ${count || data?.length || 0} predefined tickets`, 'success');
+                    if (data && data.length > 0) {
+                        log('First ticket structure:', 'info');
+                        log(`<pre>${JSON.stringify(data[0], null, 2)}</pre>`, 'info');
+                    }
+                }
+            } catch (err) {
+                log(`Unexpected error: ${err.message}`, 'error');
+            }
+        }
+
+        async function testTickets() {
+            log('Testing tickets table with proper relationships...');
+            
+            try {
+                // Test basic query
+                const { data: basicTickets, error: basicError } = await supabase
+                    .from('tickets')
+                    .select('id, ticket_number, status, scan_count')
+                    .limit(5);
+                
+                if (basicError) {
+                    log(`Basic tickets query error: ${basicError.message}`, 'error');
+                    if (basicError.message.includes('scan_count')) {
+                        log('Missing scan_count column. Run fix-tickets-scan-count.sql', 'error');
+                    }
+                } else {
+                    log(`Basic query successful. Found ${basicTickets?.length || 0} tickets`, 'success');
+                }
+                
+                // Test with relationships
+                const { data: fullTickets, error: fullError } = await supabase
+                    .from('tickets')
+                    .select(`
+                        *,
+                        events!inner (
+                            id,
+                            title,
+                            date,
+                            category
+                        ),
+                        bookings (
+                            user_name,
+                            user_email
+                        )
+                    `)
+                    .limit(5);
+                
+                if (fullError) {
+                    log(`Full tickets query error: ${fullError.message}`, 'error');
+                    log(`Error code: ${fullError.code}`, 'error');
+                } else {
+                    log(`Full query successful. Found ${fullTickets?.length || 0} tickets with relationships`, 'success');
+                    if (fullTickets && fullTickets.length > 0) {
+                        log('First ticket structure:', 'info');
+                        log(`<pre>${JSON.stringify(fullTickets[0], null, 2)}</pre>`, 'info');
+                    }
+                }
+            } catch (err) {
+                log(`Unexpected error: ${err.message}`, 'error');
+            }
+        }
+
+        async function runFixScript() {
+            log('Attempting to fix database issues...', 'info');
+            log('Please run the following SQL scripts in your Supabase SQL Editor in this order:', 'info');
+            log('<strong>CRITICAL - Run this first:</strong>', 'error');
+            log('1. complete-tickets-setup.sql - This ensures tickets table exists with all columns', 'error');
+            log('', 'info');
+            log('<strong>Then run these for additional features:</strong>', 'info');
+            log('2. fix-events-table-columns.sql', 'info');
+            log('3. SETUP-PREDEFINED-TICKETS.sql', 'info');
+            log('4. event-ticket-template-mapping.sql', 'info');
+            log('5. qr-scan-analytics-schema.sql', 'info');
+        }
+
+        // Run initial test
+        window.onload = async () => {
+            const status = document.getElementById('status');
+            
+            // Test authentication
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                status.innerHTML = `<div class="success">✓ Authenticated as: ${user.email}</div>`;
+            } else {
+                status.innerHTML = `<div class="info">Not authenticated - Running anonymous tests</div>`;
+            }
+            
+            // Auto-run tests
+            await testEvents();
+            await testPredefinedTickets();
+            await testTickets();
+        };
+    </script>
+</body>
+</html>

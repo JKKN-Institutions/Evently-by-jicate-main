@@ -1,0 +1,4 @@
+title,description,date,time,venue,location,category,price,max_attendees,status
+"Tech Conference 2024","Annual technology conference featuring latest innovations","2024-12-15","09:00","Convention Center","123 Main St, New York, NY","Technology",299,500,published
+"Music Festival","Live music performances from various artists","2024-12-20","18:00","Central Park","Central Park, New York, NY","Music",150,1000,published
+"Business Workshop","Learn essential business skills and networking","2024-12-25","10:00","Business Hub","456 Business Ave, New York, NY","Business",99,50,draft

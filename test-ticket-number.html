@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Ticket Number Display</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        canvas { border: 1px solid #ccc; margin: 10px 0; }
+        .info { background: #f0f0f0; padding: 10px; margin: 10px 0; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <h1>🧪 Ticket Number Display Test</h1>
+    
+    <div class="info">
+        <strong>Purpose:</strong> Test if ticket numbers render properly as text (not boxes)
+    </div>
+
+    <h3>1. Sample Ticket Numbers:</h3>
+    <div id="ticketNumbers"></div>
+
+    <h3>2. Canvas Text Rendering Test:</h3>
+    <canvas id="testCanvas" width="400" height="100"></canvas>
+
+    <h3>3. Font Support Test:</h3>
+    <div id="fontTest" style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;">
+        <p><strong>Test Text:</strong> 3F6C-MEY2LDV3-AUWQ</p>
+        <p><strong>Numbers:</strong> 0123456789</p>
+        <p><strong>Letters:</strong> ABCDEFGHIJKLMNOPQRSTUVWXYZ</p>
+        <p><strong>Symbols:</strong> - _ . / \ ( ) [ ]</p>
+    </div>
+
+    <script>
+        // Generate sample ticket numbers (mimicking the generateTicketNumber function)
+        function generateTicketNumber(eventId) {
+            const timestamp = Date.now().toString(36).toUpperCase()
+            const random = Math.random().toString(36).substring(2, 6).toUpperCase()
+            const eventPrefix = eventId.substring(0, 4).toUpperCase()
+            return `${eventPrefix}-${timestamp}-${random}`
+        }
+
+        // Test ticket number generation
+        const sampleNumbers = [
+            generateTicketNumber('EVENT-001'),
+            generateTicketNumber('CONCERT'),
+            generateTicketNumber('TEST'),
+            '3F6C-MEY2LDV3-AUWQ' // Your example
+        ]
+
+        // Display sample numbers
+        const numbersDiv = document.getElementById('ticketNumbers')
+        sampleNumbers.forEach((num, i) => {
+            const p = document.createElement('p')
+            p.innerHTML = `<strong>Sample ${i + 1}:</strong> <code>${num}</code>`
+            numbersDiv.appendChild(p)
+        })
+
+        // Canvas text rendering test
+        const canvas = document.getElementById('testCanvas')
+        const ctx = canvas.getContext('2d')
+        
+        // Test ticket number rendering on canvas
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)'
+        ctx.fillRect(50, 20, 300, 60)
+        
+        ctx.strokeStyle = '#cccccc'
+        ctx.lineWidth = 1
+        ctx.strokeRect(50, 20, 300, 60)
+        
+        // Test different font specifications
+        ctx.font = 'bold 12px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        ctx.fillStyle = '#666666'
+        ctx.textAlign = 'center'
+        ctx.fillText('TICKET NUMBER', 200, 35)
+        
+        ctx.font = 'bold 18px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        ctx.fillStyle = '#000000'
+        ctx.fillText(sampleNumbers[3], 200, 60) // Use your example number
+        
+        // Log results
+        console.log('✅ Test Results:')
+        console.log('Generated ticket numbers:', sampleNumbers)
+        console.log('Font rendering: Check if text appears as readable numbers, not boxes')
+        console.log('If you see boxes instead of text, there may be a font loading issue')
+        
+        // Check if ticket numbers contain proper characters
+        const hasValidChars = sampleNumbers.every(num => 
+            /^[A-Z0-9\-]+$/.test(num) && num.includes('-')
+        )
+        console.log('Valid character format:', hasValidChars ? '✅ PASS' : '❌ FAIL')
+    </script>
+</body>
+</html>
