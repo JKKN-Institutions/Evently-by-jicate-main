@@ -141,6 +141,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
         
         // Get initial navigation synchronously for immediate render
         const initialNav = getNavigationForRole(profileForNav)
+        console.log('🔧 Navigation groups loaded:', Object.keys(initialNav))
         setNavigation(initialNav)
         
         // Then check for controller assignments for regular users
@@ -422,12 +423,12 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
 
         {/* Navigation - Grouped and Clean */}
         <nav className="flex-1 px-4 py-6 overflow-y-auto">
-          {Object.entries(navigation).map(([groupName, items]) => (
-            <div key={groupName} className="mb-8">
+          {Object.entries(navigation).map(([groupName, items], groupIndex) => (
+            <div key={groupName} className={groupIndex > 0 ? "mb-8 pt-6 border-t border-gray-100" : "mb-8"}>
               {/* Group Header */}
               {desktopSidebarOpen && (
                 <div className="px-4 mb-3">
-                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider bg-gray-50 px-2 py-1 rounded">
                     {groupName}
                   </h3>
                 </div>
