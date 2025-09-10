@@ -123,14 +123,29 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   // Load navigation based on user role
   useEffect(() => {
     const loadNavigation = async () => {
-      if (effectiveProfile) {
+      // Use effectiveProfile OR create fallback profile with effectiveRole
+      const profileForNav = effectiveProfile || (effectiveRole && user ? {
+        id: user.id,
+        email: user.email || '',
+        full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+        role: effectiveRole as any,
+        avatar_url: user.user_metadata?.avatar_url || null
+      } : null)
+
+      if (profileForNav) {
+        console.log('🔧 Using profile for navigation:', {
+          email: profileForNav.email,
+          role: profileForNav.role,
+          source: effectiveProfile ? 'database' : 'fallback'
+        })
+        
         // Get initial navigation synchronously for immediate render
-        const initialNav = getNavigationForRole(effectiveProfile)
+        const initialNav = getNavigationForRole(profileForNav)
         setNavigation(initialNav)
         
         // Then check for controller assignments for regular users
-        if (effectiveProfile.role === 'user') {
-          const asyncNav = await getNavigationForRoleAsync(effectiveProfile)
+        if (profileForNav.role === 'user') {
+          const asyncNav = await getNavigationForRoleAsync(profileForNav)
           setNavigation(asyncNav)
         }
       } else {
@@ -139,7 +154,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     }
     
     loadNavigation()
-  }, [effectiveProfile?.id, effectiveProfile?.role])
+  }, [effectiveProfile?.id, effectiveProfile?.role, effectiveRole, user?.id])
 
   // Fetch real-time stats
   const fetchQuickStats = async () => {
