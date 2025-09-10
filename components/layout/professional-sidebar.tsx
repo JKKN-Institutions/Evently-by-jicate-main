@@ -89,17 +89,40 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
 
   // Derive an effective role quickly to avoid flashing user menu for admins
   // If we have a user but no profile yet, check if they're admin by email
-  const effectiveRole = profile?.role || (user?.email && isAdminEmail(user.email) ? 'admin' : null)
+  // Enhanced admin detection for production reliability
+  const effectiveRole = (() => {
+    // First priority: database profile role
+    if (profile?.role) return profile.role
+    
+    // Second priority: admin email check
+    if (user?.email && isAdminEmail(user.email)) {
+      console.log('🔧 ADMIN: Detected admin by email:', user.email)
+      return 'admin'
+    }
+    
+    // Third priority: fallback for specific admin emails (production safety)
+    if (user?.email === 'sroja@jkkn.ac.in' || user?.email === 'director@jkkn.ac.in') {
+      console.log('🔧 ADMIN: Force-detected admin by hardcoded email:', user.email)
+      return 'admin'
+    }
+    
+    // Default: no role determined yet
+    return null
+  })()
   
-  // Debug logging for production
-  if (user?.email === 'sroja@jkkn.ac.in') {
-    console.log('🔧 ADMIN DEBUG:', {
+  // Enhanced debug logging for production admin detection
+  if (user?.email === 'sroja@jkkn.ac.in' || user?.email === 'director@jkkn.ac.in') {
+    console.log('🔧 PRODUCTION ADMIN DEBUG:', {
       userEmail: user.email,
       profileRole: profile?.role,
       effectiveRole,
       isAdminEmail: isAdminEmail(user.email),
       profileExists: !!profile,
-      environment: process.env.NODE_ENV
+      environment: process.env.NODE_ENV,
+      adminEmails: ['director@jkkn.ac.in', 'sroja@jkkn.ac.in'],
+      userAuthenticated: !!user,
+      loadingState: loading,
+      supabaseConnected: !!supabase
     })
   }
   
@@ -157,8 +180,8 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     loadNavigation()
   }, [effectiveProfile?.id, effectiveProfile?.role, effectiveRole, user?.id])
 
-  // Fetch real-time stats
-  const fetchQuickStats = async () => {
+  // Fetch real-time stats with enhanced error handling for production
+  const fetchQuickStats = async (retryCount = 0) => {
     // Use fallback profile if effectiveProfile is null but we have user + effectiveRole
     const profileForStats = effectiveProfile || (effectiveRole && user ? {
       id: user.id,
@@ -168,73 +191,131 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
       avatar_url: user.user_metadata?.avatar_url || null
     } : null)
 
-    if (!profileForStats || !user) return
+    if (!profileForStats || !user) {
+      console.log('🔧 STATS: No profile or user for stats')
+      return
+    }
+
+    console.log('🔧 STATS: Fetching stats with profile:', {
+      role: profileForStats.role,
+      email: profileForStats.email,
+      retry: retryCount
+    })
 
     try {
       setQuickStats(prev => ({ ...prev, loading: true }))
 
-      // Calculate date ranges
-      const now = new Date()
-      const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-      const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-      const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0)
-
-      // Fetch total events count
-      const { count: totalEvents } = await supabase
+      // Test connection first with a simple query
+      const { data: connectionTest, error: connectionError } = await supabase
         .from('events')
-        .select('*', { count: 'exact', head: true })
+        .select('id')
+        .limit(1)
 
-      // Fetch this month's events
-      const { count: thisMonthEvents } = await supabase
-        .from('events')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', startOfThisMonth.toISOString())
+      if (connectionError) {
+        throw new Error(`Connection test failed: ${connectionError.message}`)
+      }
 
-      // Fetch last month's events for growth calculation
-      const { count: lastMonthEvents } = await supabase
-        .from('events')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', startOfLastMonth.toISOString())
-        .lte('created_at', endOfLastMonth.toISOString())
+      console.log('🔧 STATS: Supabase connection successful')
+
+      // Use Promise.allSettled for parallel queries with individual error handling
+      const queries = [
+        // Total events count
+        supabase.from('events').select('*', { count: 'exact', head: true }),
+        
+        // This month's events  
+        (() => {
+          const startOfThisMonth = new Date()
+          startOfThisMonth.setDate(1)
+          startOfThisMonth.setHours(0, 0, 0, 0)
+          return supabase
+            .from('events')
+            .select('*', { count: 'exact', head: true })
+            .gte('created_at', startOfThisMonth.toISOString())
+        })(),
+        
+        // Last month's events
+        (() => {
+          const now = new Date()
+          const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+          const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
+          return supabase
+            .from('events')
+            .select('*', { count: 'exact', head: true })
+            .gte('created_at', startOfLastMonth.toISOString())
+            .lte('created_at', endOfLastMonth.toISOString())
+        })(),
+        
+        // Active users (last 30 days)
+        (() => {
+          const thirtyDaysAgo = new Date()
+          thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+          return supabase
+            .from('profiles')
+            .select('*', { count: 'exact', head: true })
+            .gte('created_at', thirtyDaysAgo.toISOString())
+        })()
+      ]
+
+      // Add tickets query for admin users
+      if (hasRole(profileForStats, 'admin') || profileForStats.role === 'admin') {
+        queries.push(
+          supabase.from('tickets').select('*', { count: 'exact', head: true })
+        )
+      }
+
+      const results = await Promise.allSettled(queries)
+      
+      // Process results with fallbacks
+      const totalEvents = results[0].status === 'fulfilled' ? (results[0].value.count || 0) : 0
+      const thisMonthEvents = results[1].status === 'fulfilled' ? (results[1].value.count || 0) : 0  
+      const lastMonthEvents = results[2].status === 'fulfilled' ? (results[2].value.count || 0) : 0
+      const activeUsers = results[3].status === 'fulfilled' ? (results[3].value.count || 0) : 0
+      const totalTickets = (results[4]?.status === 'fulfilled' ? (results[4].value.count || 0) : 0)
 
       // Calculate growth percentage
       let growthPercentage = '0%'
-      if (lastMonthEvents && lastMonthEvents > 0) {
-        const growth = ((thisMonthEvents || 0) - lastMonthEvents) / lastMonthEvents * 100
+      if (lastMonthEvents > 0) {
+        const growth = ((thisMonthEvents - lastMonthEvents) / lastMonthEvents) * 100
         growthPercentage = growth >= 0 ? `+${growth.toFixed(1)}%` : `${growth.toFixed(1)}%`
-      } else if (thisMonthEvents && thisMonthEvents > 0) {
+      } else if (thisMonthEvents > 0) {
         growthPercentage = '+100%'
       }
 
-      // Fetch active users (users with recent activity - last 30 days)
-      const thirtyDaysAgo = new Date()
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
-      
-      const { count: activeUsers } = await supabase
-        .from('profiles')
-        .select('*', { count: 'exact', head: true })
-        .gte('created_at', thirtyDaysAgo.toISOString())
-
-      // Fetch total tickets (optional - for admin view)
-      let totalTickets = 0
-      if (hasRole(profileForStats, 'admin')) {
-        const { count: ticketCount } = await supabase
-          .from('tickets')
-          .select('*', { count: 'exact', head: true })
-        totalTickets = ticketCount || 0
-      }
+      console.log('🔧 STATS: Successfully fetched stats:', {
+        totalEvents,
+        thisMonthEvents,
+        lastMonthEvents,
+        activeUsers,
+        totalTickets,
+        growthPercentage
+      })
 
       setQuickStats({
-        totalEvents: totalEvents || 0,
+        totalEvents,
         thisMonthGrowth: growthPercentage,
-        activeUsers: activeUsers || 0,
+        activeUsers,
         totalTickets,
         loading: false
       })
 
     } catch (error) {
-      console.error('Error fetching quick stats:', error)
-      setQuickStats(prev => ({ ...prev, loading: false }))
+      console.error('🔧 STATS: Error fetching quick stats:', error)
+      
+      // Retry logic for production reliability
+      if (retryCount < 2) {
+        console.log(`🔧 STATS: Retrying stats fetch (attempt ${retryCount + 1})`)
+        setTimeout(() => fetchQuickStats(retryCount + 1), 2000 * (retryCount + 1))
+        return
+      }
+      
+      // Final fallback - set reasonable defaults
+      setQuickStats({
+        totalEvents: 0,
+        thisMonthGrowth: '0%',
+        activeUsers: 0,
+        totalTickets: 0,
+        loading: false
+      })
     }
   }
 

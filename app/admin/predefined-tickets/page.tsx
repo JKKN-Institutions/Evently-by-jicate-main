@@ -180,9 +180,9 @@ export default function PredefinedTicketsPage() {
     )
   }
 
-  const loadEvents = async () => {
+  const loadEvents = async (retryCount = 0) => {
     try {
-      console.log('Loading events from database...')
+      console.log(`Loading events from database... (attempt ${retryCount + 1})`)
       
       // First try to get user to ensure we're authenticated
       const { data: { user } } = await supabase.auth.getUser()
@@ -192,54 +192,72 @@ export default function PredefinedTicketsPage() {
         return
       }
       
-      // Increased timeout for better reliability
-      const timeoutMs = 8000 // 8 seconds timeout
+      // Test connection first
+      const { data: connectionTest, error: connectionError } = await supabase
+        .from('events')
+        .select('id')
+        .limit(1)
+
+      if (connectionError) {
+        console.warn('Connection test failed:', connectionError.message)
+        if (retryCount < 2) {
+          console.log(`Retrying events load (attempt ${retryCount + 1})`)
+          setTimeout(() => loadEvents(retryCount + 1), 3000 * (retryCount + 1))
+          return
+        }
+        setEvents([])
+        return
+      }
+
+      console.log('Supabase connection successful for events')
       
-      // Create timeout promise
-      const timeoutPromise = new Promise((resolve) => {
+      // Load events with timeout and error handling
+      const timeoutMs = 15000 // 15 seconds timeout for production
+      
+      const timeoutPromise = new Promise<any>((resolve) => {
         setTimeout(() => {
           console.warn(`Events query timed out after ${timeoutMs}ms`)
           resolve({ data: [], error: new Error('Query timeout'), isTimeout: true })
         }, timeoutMs)
       })
       
-      // Create optimized query promise - only get essential fields
-      // Note: Using * to avoid column not found errors, then we'll select what we need
+      // Enhanced query with better field selection
       const queryPromise = supabase
         .from('events')
-        .select('*') // Get all fields to avoid column errors
+        .select(`
+          id,
+          title,
+          description,
+          start_date,
+          date,
+          venue,
+          category,
+          created_at
+        `)
         .order('created_at', { ascending: false })
-        .limit(100) // Limit to 100 most recent events
+        .limit(100)
       
-      // Race between query and timeout
-      const result = await Promise.race([queryPromise, timeoutPromise]) as any
+      const result = await Promise.race([queryPromise, timeoutPromise])
 
       if (result.error) {
-        // Log error but don't show to user - events are optional
         console.warn('Events loading issue:', result.error.message)
         
-        if (result.isTimeout || result.error.message === 'Query timeout') {
-          console.info('Events loading timed out - continuing without events')
-        } else if (result.error.code === '42703' || result.error.message?.includes('column')) {
-          console.info('Events table schema mismatch - continuing without events')
-        } else if (result.error.code === '42P01' || result.error.message?.includes('relation')) {
-          console.info('Events table not found - continuing without events')
-        } else if (result.error.code === '42501' || result.error.message?.includes('permission denied')) {
-          console.info('Events access denied - continuing without events')
-        } else {
-          console.info('Could not load events - continuing without them')
+        // Retry logic for production reliability  
+        if (retryCount < 2 && !result.isTimeout) {
+          console.log(`Retrying events load due to error (attempt ${retryCount + 2})`)
+          setTimeout(() => loadEvents(retryCount + 1), 2000 * (retryCount + 1))
+          return
         }
         
-        // Always continue - events are not required for the page to function
         setEvents([])
-        // Don't show error to user - page works fine without events
-      } else if (result.data) {
+      } else if (result.data && Array.isArray(result.data)) {
         console.log(`Successfully loaded ${result.data.length} events`)
         setEvents(result.data)
         
-        // If there are events but none selected, auto-select the first one
+        // Auto-select first event if none selected
         if (result.data.length > 0 && !selectedEventId) {
           setSelectedEventId(result.data[0].id)
+          setSelectedEventCategory(result.data[0].category || '')
           console.log('Auto-selected first event:', result.data[0].title)
         }
       } else {
@@ -247,8 +265,15 @@ export default function PredefinedTicketsPage() {
         setEvents([])
       }
     } catch (error: any) {
-      // Silently handle errors - events are optional
-      console.info('Events could not be loaded - continuing without them')
+      console.error('Events loading exception:', error)
+      
+      // Retry logic for production reliability
+      if (retryCount < 2) {
+        console.log(`Retrying events load due to exception (attempt ${retryCount + 2})`)
+        setTimeout(() => loadEvents(retryCount + 1), 3000 * (retryCount + 1))
+        return
+      }
+      
       setEvents([])
     }
   }
