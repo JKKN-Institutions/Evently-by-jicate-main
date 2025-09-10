@@ -91,6 +91,18 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   // If we have a user but no profile yet, check if they're admin by email
   const effectiveRole = profile?.role || (user?.email && isAdminEmail(user.email) ? 'admin' : null)
   
+  // Debug logging for production
+  if (user?.email === 'sroja@jkkn.ac.in') {
+    console.log('🔧 ADMIN DEBUG:', {
+      userEmail: user.email,
+      profileRole: profile?.role,
+      effectiveRole,
+      isAdminEmail: isAdminEmail(user.email),
+      profileExists: !!profile,
+      environment: process.env.NODE_ENV
+    })
+  }
+  
   // Only create effectiveProfile if we have determined a role
   const effectiveProfile = profile || (effectiveRole && user ? { 
     id: user.id, 
