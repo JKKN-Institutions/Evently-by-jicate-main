@@ -87,7 +87,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           return prev
         })
-      }, 20000) // 20 second timeout - increased for slower Supabase connections
+      }, 30000) // 30 second timeout - increased for production Supabase connections
     }
     
     const immediateCheck = async () => {
@@ -434,7 +434,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         return prev
       })
-    }, 5000) // 5 second timeout
+    }, 20000) // 20 second timeout for production
 
     // Listen for auth changes
     console.log('👂 Setting up auth state change listener...')

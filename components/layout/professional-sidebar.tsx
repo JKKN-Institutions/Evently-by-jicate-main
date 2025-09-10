@@ -319,15 +319,16 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     }
   }
 
-  // Fetch stats when profile is ready  
+  // Fetch stats when profile is ready - TEMPORARILY DISABLED  
   useEffect(() => {
-    if ((effectiveProfile || effectiveRole) && user && mounted) {
-      fetchQuickStats()
-      
-      // Refresh stats every 5 minutes
-      const interval = setInterval(fetchQuickStats, 5 * 60 * 1000)
-      return () => clearInterval(interval)
-    }
+    // if ((effectiveProfile || effectiveRole) && user && mounted) {
+    //   fetchQuickStats()
+    //   
+    //   // Refresh stats every 5 minutes
+    //   const interval = setInterval(fetchQuickStats, 5 * 60 * 1000)
+    //   return () => clearInterval(interval)
+    // }
+    console.log('🔧 STATS: Quick Stats fetching temporarily disabled')
   }, [effectiveProfile?.id, effectiveRole, user?.id, mounted])
   
   if (process.env.NODE_ENV === 'development' && Object.keys(navigation).length > 0) {
@@ -347,13 +348,13 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     setMounted(true)
   }, [])
   
-  // Set timeout for loading state and track initial load
+  // Set timeout for loading state and track initial load - INCREASED FOR PRODUCTION
   useEffect(() => {
     if (loading) {
       const timeout = setTimeout(() => {
-        console.warn('Loading timeout in ProfessionalSidebar - proceeding without auth')
+        console.warn('🔧 AUTH TIMEOUT: Loading timeout in ProfessionalSidebar - proceeding with fallback auth')
         setLoadingTimeout(true)
-      }, 3000) // 3 second timeout
+      }, 15000) // Increased to 15 seconds for production
       
       return () => clearTimeout(timeout)
     } else if (!initialLoadComplete) {
@@ -364,7 +365,10 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   
   // Show loading state only on initial mount to avoid hydration mismatch
   // Always render the full UI structure for consistent hydration
-  if (!mounted || ((loading && !user) || (user && !profile && !effectiveRole && !loadingTimeout))) {
+  // More forgiving auth check for production - show sidebar if we have user OR effectiveRole
+  const shouldShowLoading = !mounted || (loading && !user && !effectiveRole && !loadingTimeout)
+  
+  if (shouldShowLoading) {
     // Return the full layout structure but with loading state content
     // This ensures the DOM structure matches between server and client
     return (
@@ -388,14 +392,20 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   console.log('🔍 ProfessionalSidebar auth check:', {
     user: user ? `${user.email} (${user.id})` : 'null',
     profile: profile ? `${profile.email} (${profile.role})` : 'null',
+    effectiveRole,
     loading,
+    loadingTimeout,
+    mounted,
     error,
     pathname: typeof window !== 'undefined' ? window.location.pathname : 'server'
   })
 
-  // If not authenticated after loading completes, redirect to sign-in
-  if (!user && !loading && !loadingTimeout) {
-    console.log('❌ No user found, checking if redirect needed...')
+  // IMPROVED: More forgiving redirect logic for production
+  // Don't redirect if we have effectiveRole (admin detected by email) even without full user session
+  const shouldRedirect = !user && !effectiveRole && !loading && loadingTimeout && mounted
+  
+  if (shouldRedirect) {
+    console.log('❌ No user or effective role found after timeout, checking if redirect needed...')
     
     // Check if we're in a redirect loop by looking for recent redirects
     const now = Date.now()
@@ -406,9 +416,9 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     // Only redirect if we're not already on auth page AND not in a redirect loop
     if (typeof window !== 'undefined' && 
         !window.location.pathname.startsWith('/auth/') &&
-        timeSinceLastRedirect > 3000) { // Wait at least 3 seconds between redirects
+        timeSinceLastRedirect > 10000) { // Increased to 10 seconds between redirects
       
-      console.log('🔄 Redirecting to sign-in page...')
+      console.log('🔄 No authentication detected after extended timeout - redirecting to sign-in...')
       localStorage.setItem('lastAuthRedirect', now.toString())
       window.location.replace('/auth/sign-in')
     } else if (timeSinceLastRedirect <= 3000) {
@@ -582,8 +592,8 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
             </div>
           ))}
 
-          {/* Quick Stats - Real-time Data */}
-          {desktopSidebarOpen && (
+          {/* Quick Stats - Real-time Data - TEMPORARILY DISABLED */}
+          {false && desktopSidebarOpen && (
             <div className="mt-8 p-5 bg-gradient-to-br from-gray-50 to-white rounded-2xl border border-gray-100">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-gray-700">Quick Stats</h3>
