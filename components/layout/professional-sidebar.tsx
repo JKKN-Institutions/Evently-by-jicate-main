@@ -159,7 +159,16 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
 
   // Fetch real-time stats
   const fetchQuickStats = async () => {
-    if (!effectiveProfile || !user) return
+    // Use fallback profile if effectiveProfile is null but we have user + effectiveRole
+    const profileForStats = effectiveProfile || (effectiveRole && user ? {
+      id: user.id,
+      email: user.email || '',
+      full_name: user.user_metadata?.full_name || 'User',
+      role: effectiveRole as any,
+      avatar_url: user.user_metadata?.avatar_url || null
+    } : null)
+
+    if (!profileForStats || !user) return
 
     try {
       setQuickStats(prev => ({ ...prev, loading: true }))
@@ -208,7 +217,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
 
       // Fetch total tickets (optional - for admin view)
       let totalTickets = 0
-      if (hasRole(effectiveProfile, 'admin')) {
+      if (hasRole(profileForStats, 'admin')) {
         const { count: ticketCount } = await supabase
           .from('tickets')
           .select('*', { count: 'exact', head: true })
@@ -229,16 +238,16 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     }
   }
 
-  // Fetch stats when profile is ready
+  // Fetch stats when profile is ready  
   useEffect(() => {
-    if (effectiveProfile && user && mounted) {
+    if ((effectiveProfile || effectiveRole) && user && mounted) {
       fetchQuickStats()
       
       // Refresh stats every 5 minutes
       const interval = setInterval(fetchQuickStats, 5 * 60 * 1000)
       return () => clearInterval(interval)
     }
-  }, [effectiveProfile?.id, user?.id, mounted])
+  }, [effectiveProfile?.id, effectiveRole, user?.id, mounted])
   
   if (process.env.NODE_ENV === 'development' && Object.keys(navigation).length > 0) {
     console.log('ProfessionalSidebar - Navigation groups:', Object.keys(navigation))
@@ -304,18 +313,34 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   })
 
   // If not authenticated after loading completes, redirect to sign-in
-  if (!user && !loading) {
+  if (!user && !loading && !loadingTimeout) {
     console.log('❌ No user found, checking if redirect needed...')
-    // Only redirect if we're not already on the auth page
-    if (typeof window !== 'undefined' && !window.location.pathname.startsWith('/auth/')) {
+    
+    // Check if we're in a redirect loop by looking for recent redirects
+    const now = Date.now()
+    const lastRedirect = typeof window !== 'undefined' ? 
+      parseInt(localStorage.getItem('lastAuthRedirect') || '0') : 0
+    const timeSinceLastRedirect = now - lastRedirect
+    
+    // Only redirect if we're not already on auth page AND not in a redirect loop
+    if (typeof window !== 'undefined' && 
+        !window.location.pathname.startsWith('/auth/') &&
+        timeSinceLastRedirect > 3000) { // Wait at least 3 seconds between redirects
+      
       console.log('🔄 Redirecting to sign-in page...')
+      localStorage.setItem('lastAuthRedirect', now.toString())
       window.location.replace('/auth/sign-in')
+    } else if (timeSinceLastRedirect <= 3000) {
+      console.log('⚠️ Redirect loop detected, waiting...')
     }
+    
     return (
       <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white">
         <div className="text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#0b6d41] mx-auto mb-2"></div>
-          <p className="text-gray-600 text-sm">Redirecting to sign in...</p>
+          <p className="text-gray-600 text-sm">
+            {timeSinceLastRedirect <= 3000 ? 'Checking authentication...' : 'Redirecting to sign in...'}
+          </p>
         </div>
       </div>
     )
@@ -524,7 +549,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
                     </span>
                   )}
                 </div>
-                {hasRole(effectiveProfile, 'admin') && (
+                {(hasRole(effectiveProfile, 'admin') || effectiveRole === 'admin') && (
                   <div className="flex items-center justify-between border-t border-gray-100 pt-3 mt-3">
                     <span className="text-sm text-gray-500">Total Tickets</span>
                     {quickStats.loading ? (
