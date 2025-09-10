@@ -229,7 +229,6 @@ export default function PredefinedTicketsPage() {
           title,
           description,
           start_date,
-          date,
           venue,
           category,
           created_at
@@ -1097,7 +1096,7 @@ export default function PredefinedTicketsPage() {
                 <option value="">Choose an event...</option>
                 {events.map(event => (
                   <option key={event.id} value={event.id}>
-                    {event.title} - {event.venue || 'No venue'} ({new Date(event.start_date || event.date || event.created_at).toLocaleDateString()})
+                    {event.title} - {event.venue || 'No venue'} ({new Date(event.start_date || event.created_at).toLocaleDateString()})
                   </option>
                 ))}
               </select>
@@ -1282,7 +1281,7 @@ export default function PredefinedTicketsPage() {
                     ) : (
                       events.map((event) => (
                         <option key={event.id} value={event.id}>
-                          {event.title} - {event.venue || 'No venue'} ({new Date(event.start_date || event.date || event.created_at).toLocaleDateString()})
+                          {event.title} - {event.venue || 'No venue'} ({new Date(event.start_date || event.created_at).toLocaleDateString()})
                         </option>
                       ))
                     )}
@@ -1583,7 +1582,7 @@ export default function PredefinedTicketsPage() {
                         <span className="text-sm font-medium">{linkedEvent.title}</span>
                       </div>
                       <span className="text-xs opacity-90">
-                        {new Date(linkedEvent.start_date || linkedEvent.date || linkedEvent.created_at).toLocaleDateString()}
+                        {new Date(linkedEvent.start_date || linkedEvent.created_at).toLocaleDateString()}
                       </span>
                     </div>
                   </div>

@@ -346,6 +346,18 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   // Set mounted state to true after hydration
   useEffect(() => {
     setMounted(true)
+    
+    // Clear any old redirect timestamps in development for immediate testing
+    if (process.env.NODE_ENV === 'development') {
+      const lastRedirect = localStorage.getItem('lastAuthRedirect')
+      if (lastRedirect) {
+        const timeSince = Date.now() - parseInt(lastRedirect)
+        if (timeSince < 30000) { // If less than 30 seconds old, clear it
+          console.log('🧹 Clearing recent redirect timestamp for immediate testing')
+          localStorage.removeItem('lastAuthRedirect')
+        }
+      }
+    }
   }, [])
   
   // Set timeout for loading state and track initial load - INCREASED FOR PRODUCTION
@@ -400,9 +412,15 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     pathname: typeof window !== 'undefined' ? window.location.pathname : 'server'
   })
 
-  // IMPROVED: More forgiving redirect logic for production
-  // Don't redirect if we have effectiveRole (admin detected by email) even without full user session
-  const shouldRedirect = !user && !effectiveRole && !loading && loadingTimeout && mounted
+  // IMPROVED: Smart redirect for unauthenticated users
+  const isProduction = process.env.NODE_ENV === 'production'
+  
+  // Immediate redirect if:
+  // - Not loading AND no user AND no effectiveRole AND mounted
+  // - For production: wait a bit longer to ensure auth completes
+  // - For development: redirect immediately after auth check completes
+  const shouldRedirect = mounted && !loading && !user && !effectiveRole && 
+    (isProduction ? loadingTimeout : true)
   
   if (shouldRedirect) {
     console.log('❌ No user or effective role found after timeout, checking if redirect needed...')
@@ -414,15 +432,17 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     const timeSinceLastRedirect = now - lastRedirect
     
     // Only redirect if we're not already on auth page AND not in a redirect loop
+    const redirectCooldown = isProduction ? 5000 : 1000 // Reduced: 5s for prod, 1s for dev
+    
     if (typeof window !== 'undefined' && 
         !window.location.pathname.startsWith('/auth/') &&
-        timeSinceLastRedirect > 10000) { // Increased to 10 seconds between redirects
+        timeSinceLastRedirect > redirectCooldown) {
       
-      console.log('🔄 No authentication detected after extended timeout - redirecting to sign-in...')
+      console.log('🔄 No authentication detected - redirecting to sign-in...')
       localStorage.setItem('lastAuthRedirect', now.toString())
       window.location.replace('/auth/sign-in')
-    } else if (timeSinceLastRedirect <= 3000) {
-      console.log('⚠️ Redirect loop detected, waiting...')
+    } else if (timeSinceLastRedirect <= redirectCooldown) {
+      console.log(`⚠️ Redirect cooldown active (${Math.ceil((redirectCooldown - timeSinceLastRedirect) / 1000)}s remaining)`)
     }
     
     return (
@@ -725,7 +745,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
                       </div>
                       <div className="text-xs text-gray-500 capitalize flex items-center gap-1">
                         <Star className="h-3 w-3 text-yellow-500" />
-                        {profile?.role || 'user'}
+                        {effectiveRole || profile?.role || 'user'}
                       </div>
                     </div>
                     <ChevronRight className={`h-4 w-4 text-gray-400 transition-transform ${showProfileMenu ? 'rotate-90' : ''}`} />
