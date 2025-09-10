@@ -27,36 +27,82 @@ export default function EventPageDetails() {
   const hasFetchedRef = useRef(false)
 
   useEffect(() => {
-    // Prevent multiple fetches
-    if (!profile || hasFetchedRef.current) return
+    // Start loading immediately, don't wait for profile
+    if (hasFetchedRef.current) return
     
     hasFetchedRef.current = true
     
     const loadData = async () => {
       setLoading(true)
-      await Promise.all([
-        fetchEventPage(),
-        fetchChildEvents(),
-        fetchEventControllers(),
-        checkPermissions()
-      ])
+      
+      // Start fetching basic data immediately
+      const eventPagePromise = fetchEventPage()
+      const childEventsPromise = fetchChildEvents()
+      
+      // Only fetch these if profile is available
+      if (profile?.id) {
+        const controllersPromise = fetchEventControllers()
+        const permissionsPromise = checkPermissions()
+        
+        await Promise.all([
+          eventPagePromise,
+          childEventsPromise,
+          controllersPromise,
+          permissionsPromise
+        ])
+      } else {
+        // Just wait for basic data if no profile yet
+        await Promise.all([eventPagePromise, childEventsPromise])
+      }
+      
       setLoading(false)
     }
     
     loadData()
-  }, [id, profile?.id]) // Only depend on profile.id, not the entire profile object
+  }, [id]) // Only depend on id, not profile
+
+  // Separate effect for profile-dependent data
+  useEffect(() => {
+    if (!profile?.id || !eventPage) return
+    
+    const loadProfileData = async () => {
+      await Promise.all([
+        fetchEventControllers(),
+        checkPermissions()
+      ])
+    }
+    
+    loadProfileData()
+  }, [profile?.id, eventPage?.id])
 
   const checkPermissions = async () => {
     if (!profile?.id) return
 
     try {
-      const { data } = await supabase.rpc('check_page_permission', {
-        p_user_id: profile.id,
-        p_page_id: id
-      })
-      setUserPermission(data || 'none')
+      // For admin users, grant full permission
+      if (profile.role === 'admin') {
+        setUserPermission('admin')
+        return
+      }
+      
+      // Check if user is a page controller
+      const { data: roleAssignment } = await supabase
+        .from('role_assignments')
+        .select('id')
+        .eq('user_id', profile.id)
+        .eq('event_page_id', id)
+        .eq('role_type', 'page_controller')
+        .eq('is_active', true)
+        .single()
+      
+      if (roleAssignment) {
+        setUserPermission('page_controller')
+      } else {
+        setUserPermission('none')
+      }
     } catch (error) {
       console.error('Error checking permissions:', error)
+      setUserPermission('none')
     }
   }
 

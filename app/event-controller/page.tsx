@@ -34,62 +34,172 @@ export default function EventControllerDashboard() {
     const userId = profile?.id || user?.id
     if (!userId) {
       console.log('No user ID available')
+      console.log('Profile:', profile)
+      console.log('User:', user)
       setLoading(false)
       return
     }
     
-    console.log('Fetching events for user:', userId)
+    console.log('========================================')
+    console.log('CURRENT USER DETAILS:')
+    console.log('User ID:', userId)
+    console.log('User Email:', profile?.email || user?.email)
+    console.log('User Role:', profile?.role)
+    console.log('========================================')
     fetchMyEvents()
   }, [profile, user, authLoading])
 
   const fetchMyEvents = async () => {
     const userId = profile?.id || user?.id
-    if (!userId) return
+    if (!userId) {
+      console.log('No userId available for fetching events')
+      return
+    }
+
+    console.log('Fetching events for userId:', userId)
+    console.log('User role:', profile?.role)
 
     try {
-      // First check event_controllers table for direct assignments
-      const { data: controllerAssignments, error: controllerError } = await supabase
-        .from('event_controllers')
-        .select('event_id')
-        .eq('controller_id', userId)
-      
       let eventIds = []
       
-      if (!controllerError && controllerAssignments && controllerAssignments.length > 0) {
-        console.log('Found event controller assignments:', controllerAssignments.length)
-        eventIds = controllerAssignments.map(a => a.event_id)
-      }
-      
-      // If no events found, check role_assignments as fallback
-      if (eventIds.length === 0) {
+      // If user is admin, fetch ALL events that have event controllers assigned
+      if (profile?.role === 'admin') {
+        console.log('User is admin - fetching ALL events with controllers...')
+        
+        // Get all event controller assignments
+        const { data: allAssignments, error: allError } = await supabase
+          .from('role_assignments')
+          .select('*')
+          .eq('role_type', 'event_controller')
+          .eq('is_active', true)
+        
+        if (allError) {
+          console.error('Error fetching all assignments:', allError)
+          setMyEvents([])
+          setLoading(false)
+          return
+        }
+        
+        console.log('All event controller assignments:', allAssignments)
+        
+        // For admin, show ALL events (not just ones with controllers)
+        console.log('Fetching all events from events table...')
+        
+        // First try a simple count to test access
+        const { count: eventCount, error: countError } = await supabase
+          .from('events')
+          .select('*', { count: 'exact', head: true })
+        
+        console.log('Event count test:', { count: eventCount, error: countError })
+        
+        // Now fetch the actual events
+        let allEvents = null
+        let eventsError = null
+        
+        // Try with ordering first
+        const orderedResult = await supabase
+          .from('events')
+          .select('*')
+          .order('date', { ascending: false })
+        
+        if (orderedResult.error) {
+          console.log('Ordered query failed, trying without order...')
+          // If ordering fails, try without it
+          const simpleResult = await supabase
+            .from('events')
+            .select('*')
+          
+          allEvents = simpleResult.data
+          eventsError = simpleResult.error
+        } else {
+          allEvents = orderedResult.data
+          eventsError = orderedResult.error
+        }
+        
+        console.log('Events query result:', { 
+          data: allEvents, 
+          error: eventsError,
+          errorMessage: eventsError?.message,
+          errorCode: eventsError?.code,
+          errorDetails: eventsError?.details
+        })
+        
+        if (eventsError) {
+          console.error('Error fetching all events - Full error:', eventsError)
+          console.error('Error message:', eventsError.message)
+          console.error('Error code:', eventsError.code)
+          console.error('Error details:', eventsError.details)
+          
+          // Try one more time with minimal query
+          console.log('Attempting minimal query...')
+          const { data: minimalEvents, error: minimalError } = await supabase
+            .from('events')
+            .select('id, title, date')
+            .limit(10)
+          
+          if (minimalError) {
+            console.error('Even minimal query failed:', minimalError)
+            setMyEvents([])
+            setLoading(false)
+            return
+          } else {
+            console.log('Minimal query succeeded with events:', minimalEvents)
+            setMyEvents(minimalEvents || [])
+            setLoading(false)
+            return
+          }
+        }
+        
+        console.log('All events for admin:', allEvents)
+        setMyEvents(allEvents || [])
+        setLoading(false)
+        return
+        
+      } else {
+        // For non-admin users, only show events they're assigned to
+        console.log('Non-admin user - fetching assigned events only...')
+        
         const { data: assignments, error: assignmentError } = await supabase
           .from('role_assignments')
-          .select('event_id')
+          .select('*')
           .eq('user_id', userId)
           .eq('role_type', 'event_controller')
           .eq('is_active', true)
         
-        if (!assignmentError && assignments) {
-          eventIds = assignments.map(a => a.event_id).filter(id => id !== null)
+        console.log('Query result:', { assignments, assignmentError })
+        
+        if (assignmentError) {
+          console.error('Error fetching role assignments:', assignmentError)
+          setMyEvents([])
+          setLoading(false)
+          return
         }
-      }
-      
-      if (eventIds.length === 0) {
-        console.log('No event controller assignments found')
-        setMyEvents([])
-        setLoading(false)
-        return
-      }
-      
-      // Fetch the actual event details
-      const { data: events, error: eventsError } = await supabase
-        .from('events')
-        .select('*')
-        .in('id', eventIds)
-      
-      if (eventsError) throw eventsError
+        
+        if (assignments && assignments.length > 0) {
+          console.log('Found event controller assignments:', assignments)
+          eventIds = assignments.map(a => a.event_id).filter(id => id !== null)
+          console.log('Extracted event IDs:', eventIds)
+        } else {
+          console.log('No assignments found for user')
+        }
+        
+        if (eventIds.length === 0) {
+          console.log('No event controller assignments found')
+          setMyEvents([])
+          setLoading(false)
+          return
+        }
+        
+        // Fetch the actual event details
+        const { data: events, error: eventsError } = await supabase
+          .from('events')
+          .select('*')
+          .in('id', eventIds)
+        
+        if (eventsError) throw eventsError
 
-      setMyEvents(events || [])
+        setMyEvents(events || [])
+      }
       
       // Skip detailed stats for performance - load on demand
       console.log('Skipping detailed stats for initial load performance')
@@ -150,7 +260,11 @@ export default function EventControllerDashboard() {
       {/* Header */}
       <div className="mb-8">
         <h1 className="text-3xl font-bold text-gray-900">Event Controller Dashboard</h1>
-        <p className="mt-2 text-gray-600">Manage your assigned events and track their performance</p>
+        <p className="mt-2 text-gray-600">
+          {profile?.role === 'admin' 
+            ? 'Manage all events across the platform'
+            : 'Manage your assigned events and track their performance'}
+        </p>
       </div>
 
       {/* Summary Stats */}
@@ -195,7 +309,9 @@ export default function EventControllerDashboard() {
 
       {/* My Events */}
       <div className="space-y-6">
-        <h2 className="text-2xl font-bold text-gray-900">My Events</h2>
+        <h2 className="text-2xl font-bold text-gray-900">
+          {profile?.role === 'admin' ? 'All Events' : 'My Events'}
+        </h2>
         
         {myEvents.map((event) => {
           const stats = getEventStats(event.id)

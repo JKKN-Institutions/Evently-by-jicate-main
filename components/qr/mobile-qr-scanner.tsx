@@ -73,14 +73,50 @@ export default function MobileQRScanner({ eventId, eventTitle, onScanResult }: M
       const html5QrCode = new Html5Qrcode("mobile-qr-reader")
       scannerRef.current = html5QrCode
 
+      // Enhanced configuration for SMALL printed QR codes (80-100px)
       const config = {
-        fps: 10,
+        fps: 30, // Higher FPS for faster detection of small QRs
         qrbox: { 
-          width: Math.min(350, window.innerWidth * 0.85), // Increased from 300 for better detection
-          height: Math.min(350, window.innerWidth * 0.85) 
+          width: Math.min(400, window.innerWidth * 0.9), // Larger scan area for small QRs
+          height: Math.min(400, window.innerWidth * 0.9) 
         },
         aspectRatio: 1.0,
-        supportedScanTypes: [0, 1] // QR Code and Data Matrix for broader compatibility
+        supportedScanTypes: [0], // Focus only on QR codes for better performance
+        experimentalFeatures: {
+          useBarCodeDetectorIfSupported: true // Use native API for better performance
+        },
+        rememberLastUsedCamera: true,
+        showTorchButtonIfSupported: true,
+        videoConstraints: {
+          facingMode: { exact: 'environment' },
+          // High resolution for small QR details
+          width: { min: 1280, ideal: 1920, max: 3840 },
+          height: { min: 720, ideal: 1080, max: 2160 },
+          frameRate: { min: 15, ideal: 30, max: 60 },
+          // Advanced settings for small QR detection
+          advanced: [
+            {
+              // Close-up macro focus
+              focusMode: 'continuous',
+              focusDistance: { min: 0.05, ideal: 0.15, max: 0.5 }
+            },
+            {
+              // Digital zoom for small QRs
+              zoom: { min: 1, ideal: 2, max: 3 }
+            },
+            {
+              // Better exposure for printed materials
+              exposureMode: 'continuous',
+              exposureCompensation: { min: -1, ideal: 0, max: 1 }
+            },
+            {
+              // Enhanced image quality
+              sharpness: { ideal: 100 },
+              contrast: { ideal: 90 },
+              saturation: { ideal: 80 }
+            }
+          ]
+        }
       }
 
       await html5QrCode.start(

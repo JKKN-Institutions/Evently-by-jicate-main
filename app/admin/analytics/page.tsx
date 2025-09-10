@@ -120,38 +120,70 @@ export default function SimplifiedAnalyticsPage() {
       }
 
       const { data: eventsData, error: eventsError } = await eventsQuery
-      if (eventsError) throw eventsError
+      if (eventsError) {
+        console.warn('Error loading events:', eventsError.message)
+        // Continue with empty events - don't block analytics
+      }
       console.log(`Loaded ${eventsData?.length || 0} events`)
 
-      // Load ALL tickets with pagination to handle large datasets
-      const ticketsPerPage = 1000
+      // Load tickets with timeout protection and smaller batches
+      const ticketsPerPage = 500 // Reduced from 1000 for better performance
       let allTickets: any[] = []
       let hasMore = true
       let offset = 0
+      const maxBatches = 10 // Limit to 5000 tickets max for initial load
+      let batchCount = 0
       
       console.log('Starting to load tickets...')
-      while (hasMore) {
-        const { data: ticketsData, error: ticketsError } = await supabase
-          .from('tickets')
-          .select('event_id, ticket_type, status, scan_count')
-          .range(offset, offset + ticketsPerPage - 1)
+      
+      // Create a timeout wrapper for the ticket loading
+      const loadTicketsWithTimeout = async () => {
+        const timeoutMs = 15000 // 15 seconds timeout for all tickets
         
-        if (ticketsError) {
-          console.error('Error loading tickets:', ticketsError)
-          throw ticketsError
-        }
+        const timeoutPromise = new Promise((resolve) => {
+          setTimeout(() => {
+            console.info('Tickets loading timeout - continuing with partial data')
+            resolve({ success: false, tickets: allTickets })
+          }, timeoutMs)
+        })
         
-        if (ticketsData && ticketsData.length > 0) {
-          allTickets = [...allTickets, ...ticketsData]
-          console.log(`Loaded ${ticketsData.length} tickets (total: ${allTickets.length})`)
-          hasMore = ticketsData.length === ticketsPerPage
-          offset += ticketsPerPage
-        } else {
-          hasMore = false
-        }
+        const loadPromise = (async () => {
+          while (hasMore && batchCount < maxBatches) {
+            try {
+              const { data: ticketsData, error: ticketsError } = await supabase
+                .from('tickets')
+                .select('event_id, ticket_type, status, scan_count')
+                .range(offset, offset + ticketsPerPage - 1)
+              
+              if (ticketsError) {
+                console.warn('Error loading tickets batch:', ticketsError.message)
+                // Don't throw - continue with what we have
+                break
+              }
+              
+              if (ticketsData && ticketsData.length > 0) {
+                allTickets = [...allTickets, ...ticketsData]
+                console.log(`Loaded batch ${batchCount + 1}: ${ticketsData.length} tickets (total: ${allTickets.length})`)
+                hasMore = ticketsData.length === ticketsPerPage
+                offset += ticketsPerPage
+                batchCount++
+              } else {
+                hasMore = false
+              }
+            } catch (error) {
+              console.warn('Error in ticket batch loading:', error)
+              break // Stop loading but continue with what we have
+            }
+          }
+          return { success: true, tickets: allTickets }
+        })()
+        
+        // Race between loading and timeout
+        const result = await Promise.race([loadPromise, timeoutPromise]) as any
+        return result.tickets
       }
       
-      const ticketsData = allTickets
+      const ticketsData = await loadTicketsWithTimeout()
       console.log(`Total tickets loaded: ${ticketsData.length}`)
 
       // Load ALL predefined ticket templates (ticket_level field doesn't exist in table)
@@ -268,7 +300,13 @@ export default function SimplifiedAnalyticsPage() {
       setCategories(finalCategories)
 
     } catch (error: any) {
-      console.error('Error loading analytics:', error)
+      // Don't show errors to user - analytics can work with partial data
+      console.warn('Analytics loading issue:', error?.message || error)
+      
+      // Set empty data if nothing loaded
+      if (categories.length === 0) {
+        setCategories([])
+      }
     } finally {
       setLoading(false)
       setRefreshing(false)

@@ -71,22 +71,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   
   // Immediate session check on mount
   React.useEffect(() => {
-    if (isDev) console.log('🔥 IMMEDIATE session check on AuthProvider mount')
+    console.log('🔥 IMMEDIATE session check on AuthProvider mount')
     
-    // Set a timeout to prevent infinite loading
-    const loadingTimeout = setTimeout(() => {
-      console.warn('⚠️ Auth check timeout - setting loading to false')
-      setState(prev => ({ ...prev, loading: false }))
-    }, 5000) // 5 second timeout
+    let loadingTimeout: NodeJS.Timeout | null = null
+    
+    // Only set timeout if we're actually loading
+    if (state.loading) {
+      loadingTimeout = setTimeout(() => {
+        setState(prev => {
+          // Only show warning if still loading
+          if (prev.loading) {
+            console.warn('⚠️ Auth check timeout - setting loading to false')
+            console.log('Timeout reached, current state:', prev)
+            return { ...prev, loading: false }
+          }
+          return prev
+        })
+      }, 20000) // 20 second timeout - increased for slower Supabase connections
+    }
     
     const immediateCheck = async () => {
       try {
+        console.log('Getting session from Supabase...')
         const { data: { session }, error: sessionError } = await supabase.auth.getSession()
         
         if (sessionError) {
           console.error('🔥 Session error:', sessionError)
           setState({ user: null, profile: null, loading: false, error: sessionError.message })
-          clearTimeout(loadingTimeout)
+          if (loadingTimeout) clearTimeout(loadingTimeout)
           return
         }
         
@@ -106,6 +118,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (isDev) console.log('🔥 IMMEDIATE: Profile found:', profile)
             const newState = { user: session.user, profile, loading: false, error: null }
             setState(newState)
+            if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout on success
             
             // Cache the auth state
             localStorage.setItem('auth_state_cache', JSON.stringify({
@@ -133,6 +146,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (newProfile && !createError) {
               console.log('🔥 IMMEDIATE: Profile created:', newProfile)
               setState({ user: session.user, profile: newProfile, loading: false, error: null })
+              if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout on success
               
               // Cache the auth state
               localStorage.setItem('auth_state_cache', JSON.stringify({
@@ -145,12 +159,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               const { data: existingProfile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
               if (existingProfile) {
                 setState({ user: session.user, profile: existingProfile, loading: false, error: null })
+                if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout on success
               } else {
                 setState({ user: session.user, profile: null, loading: false, error: null })
+                if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout even without profile
               }
             } else {
               console.error('🔥 IMMEDIATE: Failed to create profile:', createError)
               setState({ user: session.user, profile: null, loading: false, error: null })
+              if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout
             }
           }
         } else {
@@ -171,7 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     // Cleanup
     return () => {
-      clearTimeout(loadingTimeout)
+      if (loadingTimeout) clearTimeout(loadingTimeout)
     }
   }, [supabase, isDev])
 

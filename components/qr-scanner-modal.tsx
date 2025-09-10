@@ -2,9 +2,10 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { Html5Qrcode } from 'html5-qrcode'
-import { X, Camera, AlertCircle, Upload, Loader2, QrCode, ZoomIn, ZoomOut, RotateCcw } from 'lucide-react'
+import { X, Camera, AlertCircle, Upload, Loader2, QrCode, ZoomIn, ZoomOut, RotateCcw, Info } from 'lucide-react'
 import QRFileScanner from './qr-file-scanner'
 import { validateQRSize } from '@/lib/qr-generator'
+import { SMALL_QR_CONFIG, ULTRA_SMALL_QR_CONFIG, getOptimalCamera, SMALL_QR_TIPS } from '@/lib/small-qr-scanner'
 
 interface QRScannerModalProps {
   isOpen: boolean
@@ -117,27 +118,65 @@ export default function QRScannerModal({ isOpen, onClose, onScan }: QRScannerMod
       const cameraId = cameras[0]?.id
       
       if (cameraId) {
-        // Alternative configuration with larger scan area and different settings
+        // Alternative ULTRA-HIGH DETAIL configuration for extremely small QR codes
         await html5QrCode.start(
           cameraId,
           {
-            fps: 20, // Even higher FPS
+            fps: 60, // Maximum FPS for real-time detection
             qrbox: function(viewfinderWidth, viewfinderHeight) {
-              // Try larger scan area
+              // Full screen scan area for maximum coverage
               let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight)
-              let qrboxSize = Math.floor(minEdgeSize * 0.8) // Larger scan area
+              let qrboxSize = Math.floor(minEdgeSize * 0.9) // Nearly full screen
               return {
                 width: qrboxSize,
                 height: qrboxSize
               }
             },
-            aspectRatio: 1.777778,
-            disableFlip: true, // Disable flip for better performance
+            aspectRatio: 1.0,
+            disableFlip: false,
+            formatsToSupport: [0], // QR codes only
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true,
+              // Additional experimental features for better detection
+              decodingAnalyticsEnabled: true,
+              multiCodeDetectionEnabled: true // Detect multiple QRs simultaneously
+            },
+            rememberLastUsedCamera: true,
+            showTorchButtonIfSupported: true,
             videoConstraints: {
               facingMode: 'environment',
-              // Ultra high resolution for tiny details
-              width: { ideal: 3840, max: 4096 },
-              height: { ideal: 2160, max: 2304 }
+              // Maximum possible resolution for microscopic detail
+              width: { min: 2560, ideal: 4096, max: 7680 },
+              height: { min: 1440, ideal: 2304, max: 4320 },
+              frameRate: { min: 30, ideal: 60, max: 120 },
+              // Ultra-aggressive camera settings for tiny QRs
+              advanced: [
+                {
+                  // Super close macro focus
+                  focusMode: 'continuous',
+                  focusDistance: { min: 0.01, ideal: 0.1, max: 0.5 }
+                },
+                {
+                  // Maximum digital zoom
+                  zoom: { min: 2, ideal: 3, max: 5 }
+                },
+                {
+                  // HDR mode if available
+                  exposureMode: 'continuous',
+                  hdr: true
+                },
+                {
+                  // Maximum sharpness and detail
+                  sharpness: { ideal: 100 },
+                  saturation: { ideal: 100 },
+                  contrast: { ideal: 100 }
+                },
+                {
+                  // Noise reduction for cleaner image
+                  noiseSuppression: true,
+                  autoGainControl: true
+                }
+              ]
             }
           },
           (decodedText) => {
@@ -269,36 +308,65 @@ Check 'Show Scan Details' for more tips.`)
       setScanStartTime(Date.now())
       setScanAttempts(prev => prev + 1)
 
-      // Enhanced scanning configuration for small QR codes
+      // Enhanced scanning configuration optimized for SMALL printed QR codes (80-100px)
       await html5QrCode.start(
         cameraId,
         {
-          fps: 15,  // Higher FPS for small QR detection
+          fps: 30,  // Maximum FPS for rapid detection of small QRs
           qrbox: function(viewfinderWidth, viewfinderHeight) {
-            // Multiple scan areas for small QR codes
+            // Dynamic scan box that's optimal for small QR codes
             let minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight)
-            // Use smaller scan box initially to focus on small QRs
-            let qrboxSize = Math.floor(minEdgeSize * 0.4) // Reduced from 0.7 to 0.4 for small QRs
+            // Larger scan area (60-70%) to capture small QRs from various distances
+            let qrboxSize = Math.floor(minEdgeSize * 0.65) // Increased for better small QR coverage
             return {
               width: qrboxSize,
               height: qrboxSize
             }
           },
-          aspectRatio: 1.0, // Square for better small QR detection
+          aspectRatio: 1.0, // Square aspect for QR codes
           disableFlip: false,
+          formatsToSupport: [0], // Focus only on QR codes for better performance
+          experimentalFeatures: {
+            useBarCodeDetectorIfSupported: true // Use native API if available
+          },
           videoConstraints: {
             facingMode: 'environment',
-            focusMode: 'continuous',
-            // Higher resolution for small QR detail capture
-            width: { min: 1280, ideal: 1920, max: 3840 },
-            height: { min: 720, ideal: 1080, max: 2160 },
-            // Enhanced constraints for close-up scanning
+            // Ultra-high resolution for capturing small QR details
+            width: { min: 1920, ideal: 2560, max: 4096 },
+            height: { min: 1080, ideal: 1440, max: 2304 },
+            frameRate: { min: 15, ideal: 30, max: 60 },
+            // Advanced camera constraints for small QR detection
             advanced: [
-              { focusMode: 'continuous' },
-              { focusDistance: { min: 0.1, max: 10 } }, // Close focus range
-              { exposureMode: 'continuous' },
-              { whiteBalanceMode: 'continuous' },
-              { zoom: { min: 1, max: 3 } } // Allow digital zoom
+              { 
+                // Macro focus for close-up scanning
+                focusMode: 'continuous',
+                focusDistance: { ideal: 0.15, min: 0.05, max: 1.0 } // Very close focus
+              },
+              { 
+                // High zoom for small QRs
+                zoom: { min: 1, ideal: 2, max: 4 } 
+              },
+              {
+                // Optimal exposure for printed QRs
+                exposureMode: 'continuous',
+                exposureCompensation: { min: -2, ideal: 0, max: 2 }
+              },
+              {
+                // Better white balance for printed materials
+                whiteBalanceMode: 'continuous'
+              },
+              {
+                // ISO settings for better low-light performance
+                iso: { min: 100, ideal: 400, max: 1600 }
+              },
+              {
+                // Sharpness for small details
+                sharpness: { min: 0, ideal: 100, max: 100 }
+              },
+              {
+                // Contrast for better QR definition
+                contrast: { min: 0, ideal: 80, max: 100 }
+              }
             ]
           }
         },
@@ -556,15 +624,69 @@ Check 'Show Scan Details' for more tips.`)
                     </div>
                   </div>
                   
-                  {/* Small QR Tips */}
-                  <div className="bg-blue-50 rounded-lg p-3">
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-blue-700 mb-2">💡 For Small QR Codes:</p>
-                      <div className="text-xs text-blue-600 space-y-1">
-                        <p>• Hold camera 6-12 inches from QR code</p>
-                        <p>• QR should fill 30-50% of camera view</p>
-                        <p>• Keep steady for 2-3 seconds</p>
+                  {/* Enhanced Small QR Tips with visual guide */}
+                  <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg p-4 border border-blue-200">
+                    <div className="flex items-center gap-2 mb-3">
+                      <Info className="h-5 w-5 text-blue-600" />
+                      <p className="text-sm font-semibold text-blue-800">Optimized for Small Printed QR Codes</p>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-xs">
+                      <div className="space-y-2">
+                        <div className="flex items-start gap-2">
+                          <span className="text-blue-600 font-bold">📏</span>
+                          <div>
+                            <p className="font-medium text-blue-700">Distance</p>
+                            <p className="text-blue-600">6-12 inches (15-30cm)</p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="text-blue-600 font-bold">🎯</span>
+                          <div>
+                            <p className="font-medium text-blue-700">Positioning</p>
+                            <p className="text-blue-600">Center QR in frame</p>
+                          </div>
+                        </div>
                       </div>
+                      <div className="space-y-2">
+                        <div className="flex items-start gap-2">
+                          <span className="text-blue-600 font-bold">💡</span>
+                          <div>
+                            <p className="font-medium text-blue-700">Lighting</p>
+                            <p className="text-blue-600">Bright, even light</p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2">
+                          <span className="text-blue-600 font-bold">⏱️</span>
+                          <div>
+                            <p className="font-medium text-blue-700">Hold Time</p>
+                            <p className="text-blue-600">2-3 seconds steady</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    {/* Visual size guide */}
+                    <div className="mt-3 pt-3 border-t border-blue-200">
+                      <div className="flex items-center justify-center gap-4">
+                        <div className="text-center">
+                          <div className="w-12 h-12 border-2 border-red-400 rounded flex items-center justify-center">
+                            <div className="w-3 h-3 bg-black"></div>
+                          </div>
+                          <p className="text-xs text-red-600 mt-1">Too Small</p>
+                        </div>
+                        <div className="text-center">
+                          <div className="w-12 h-12 border-2 border-green-400 rounded flex items-center justify-center">
+                            <div className="w-6 h-6 bg-black"></div>
+                          </div>
+                          <p className="text-xs text-green-600 mt-1">Perfect</p>
+                        </div>
+                        <div className="text-center">
+                          <div className="w-12 h-12 border-2 border-red-400 rounded flex items-center justify-center">
+                            <div className="w-10 h-10 bg-black"></div>
+                          </div>
+                          <p className="text-xs text-red-600 mt-1">Too Large</p>
+                        </div>
+                      </div>
+                      <p className="text-xs text-blue-600 text-center mt-2">QR should fill 30-50% of camera view</p>
                     </div>
                   </div>
                   

@@ -1,13 +1,17 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { QrCode, CheckCircle, XCircle, AlertCircle, Camera, X } from 'lucide-react'
+import { QrCode, CheckCircle, XCircle, AlertCircle, Camera, X, Info, Loader2 } from 'lucide-react'
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode'
+import { SMALL_QR_CONFIG, getOptimalCamera } from '@/lib/small-qr-scanner'
 
 export default function SimpleVerifyPage() {
   const [qrInput, setQrInput] = useState('')
   const [verifying, setVerifying] = useState(false)
   const [scannerActive, setScannerActive] = useState(false)
+  const [isInitializing, setIsInitializing] = useState(false)
+  const [scanAttempts, setScanAttempts] = useState(0)
+  const [showTips, setShowTips] = useState(false)
   const [result, setResult] = useState<{
     success: boolean
     message: string
@@ -47,39 +51,80 @@ export default function SimpleVerifyPage() {
     setResult(null)
   }
 
-  // Start the actual scanner after the div is rendered
+  // Enhanced scanner for small QR codes
   useEffect(() => {
     if (scannerActive && !scannerRef.current) {
       // Small delay to ensure div is rendered
       const timer = setTimeout(async () => {
+        setIsInitializing(true)
         try {
-          const html5QrCode = new Html5Qrcode('qr-reader')
+          const html5QrCode = new Html5Qrcode('qr-reader', {
+            verbose: false,
+            experimentalFeatures: {
+              useBarCodeDetectorIfSupported: true
+            }
+          } as any)
           scannerRef.current = html5QrCode
           
+          // Get optimal camera for scanning
+          const cameraId = await getOptimalCamera()
+          
+          if (!cameraId) {
+            throw new Error('No camera found')
+          }
+          
+          // Use enhanced configuration for small QR codes
+          const config = {
+            ...SMALL_QR_CONFIG,
+            fps: 30, // High FPS for small QR detection
+            qrbox: function(viewfinderWidth: number, viewfinderHeight: number) {
+              const minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight)
+              const qrboxSize = Math.floor(minEdgeSize * 0.7) // 70% scan area
+              return {
+                width: qrboxSize,
+                height: qrboxSize
+              }
+            }
+          }
+          
           await html5QrCode.start(
-            { facingMode: 'environment' },
-            {
-              fps: 10,
-              qrbox: { width: 250, height: 250 }
-            },
+            cameraId,
+            config,
             (decodedText) => {
-              console.log('QR Code detected:', decodedText)
+              console.log('Small QR Code detected:', decodedText)
+              setScanAttempts(0)
               verifyQRCode(decodedText)
             },
             (errorMessage) => {
-              // Ignore scanning errors
+              // Track scan attempts for small QRs
+              if (!errorMessage.includes('NotFoundException')) {
+                console.log('Scan error:', errorMessage)
+              }
+              // Show tips after 5 seconds of scanning
+              if (scanAttempts === 0) {
+                setScanAttempts(1)
+                setTimeout(() => {
+                  if (scannerRef.current) {
+                    setShowTips(true)
+                  }
+                }, 5000)
+              }
             }
           )
+          
+          console.log('Enhanced QR scanner started for small QR codes')
         } catch (err) {
           console.error('Failed to start scanner:', err)
           setScannerActive(false)
           alert('Unable to access camera. Please check permissions.')
+        } finally {
+          setIsInitializing(false)
         }
       }, 100)
       
       return () => clearTimeout(timer)
     }
-  }, [scannerActive])
+  }, [scannerActive, scanAttempts])
 
   const stopScanner = () => {
     if (scannerRef.current) {
@@ -105,6 +150,8 @@ export default function SimpleVerifyPage() {
     setQrInput('')
     setResult(null)
     setScannerActive(false)
+    setShowTips(false)
+    setScanAttempts(0)
   }
 
   return (
@@ -123,16 +170,67 @@ export default function SimpleVerifyPage() {
 
           {!result ? (
             <div className="space-y-4">
-              {/* Camera Scanner */}
+              {/* Enhanced Camera Scanner for Small QR Codes */}
               {scannerActive ? (
-                <div className="relative">
-                  <div id="qr-reader" className="w-full rounded-lg overflow-hidden" />
-                  <button
-                    onClick={stopScanner}
-                    className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-full"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
+                <div className="space-y-4">
+                  <div className="relative">
+                    <div id="qr-reader" className="w-full rounded-lg overflow-hidden" />
+                    
+                    {/* Loading overlay */}
+                    {isInitializing && (
+                      <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
+                        <div className="text-white text-center">
+                          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                          <p className="text-sm">Initializing enhanced scanner...</p>
+                        </div>
+                      </div>
+                    )}
+                    
+                    {/* Scanner overlay with guidelines */}
+                    {!isInitializing && (
+                      <div className="absolute inset-0 pointer-events-none">
+                        <div className="absolute inset-8 border-2 border-white rounded-lg opacity-50">
+                          <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-blue-400"></div>
+                          <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-blue-400"></div>
+                          <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-blue-400"></div>
+                          <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-blue-400"></div>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <button
+                      onClick={stopScanner}
+                      className="absolute top-2 right-2 bg-red-600 hover:bg-red-700 text-white p-2 rounded-full z-10"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                    
+                    {/* Small QR indicator */}
+                    <div className="absolute top-2 left-2 bg-blue-600 text-white px-2 py-1 rounded text-xs font-medium">
+                      Optimized for Small QR
+                    </div>
+                  </div>
+                  
+                  {/* Small QR Scanning Tips */}
+                  {showTips && (
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                      <div className="flex items-start gap-2">
+                        <Info className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                        <div className="text-sm">
+                          <p className="font-semibold text-blue-800 dark:text-blue-300 mb-2">
+                            Tips for Small Printed QR Codes:
+                          </p>
+                          <ul className="space-y-1 text-blue-700 dark:text-blue-400">
+                            <li>• Hold camera 6-12 inches (15-30cm) from QR</li>
+                            <li>• Ensure QR fills 30-50% of the frame</li>
+                            <li>• Use good lighting, avoid shadows</li>
+                            <li>• Keep camera steady for 2-3 seconds</li>
+                            <li>• Try different angles if needed</li>
+                          </ul>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <button

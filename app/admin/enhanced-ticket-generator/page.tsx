@@ -109,8 +109,7 @@ export default function EnhancedTicketGeneratorPage() {
           events (
             id,
             title,
-            date,
-            time,
+            start_date,
             venue,
             category
           )
@@ -131,11 +130,49 @@ export default function EnhancedTicketGeneratorPage() {
         }
       }
 
-      const { data: tickets, error } = await query
+      let { data: tickets, error } = await query
 
       if (error) {
-        console.error('Error fetching generated tickets:', error)
-        return
+        console.warn('Error with joined query, trying simplified query:', {
+          message: error.message,
+          code: error.code,
+          details: error.details
+        })
+        
+        // Fallback: Try without the events join
+        let fallbackQuery = supabase
+          .from('tickets')
+          .select('*')
+          .or('ticket_type.eq.enhanced,ticket_type.eq.Enhanced')
+          .order('created_at', { ascending: false })
+
+        // Apply the same filters for non-admin users
+        if (profile?.role !== 'admin') {
+          const { data: userEvents } = await supabase
+            .from('events')
+            .select('id')
+            .eq('organizer_id', user.id)
+          
+          if (userEvents && userEvents.length > 0) {
+            const eventIds = userEvents.map(e => e.id)
+            fallbackQuery = fallbackQuery.in('event_id', eventIds)
+          }
+        }
+
+        const fallbackResult = await fallbackQuery
+        tickets = fallbackResult.data
+        error = fallbackResult.error
+
+        if (error) {
+          console.error('Error fetching generated tickets (fallback also failed):', {
+            message: error.message,
+            code: error.code,
+            details: error.details,
+            hint: error.hint,
+            fullError: error
+          })
+          return
+        }
       }
 
       // Transform tickets to match the expected format

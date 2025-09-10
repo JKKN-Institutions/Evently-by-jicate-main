@@ -22,9 +22,16 @@ export function UserManagement() {
   const [showRoleDropdown, setShowRoleDropdown] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
   const [roleFilter, setRoleFilter] = useState<'all' | 'user' | 'organizer' | 'admin'>('all')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalUsers, setTotalUsers] = useState(0)
+  const [hasMore, setHasMore] = useState(true)
+  const [retryCount, setRetryCount] = useState(0)
+  const usersPerPage = 50 // Reduced from 500 for faster initial load
 
   useEffect(() => {
-    fetchUsers()
+    // Direct fetch without unnecessary delays
+    console.log('Initial user fetch starting...')
+    fetchUsers(1, true) // Load first page and reset
   }, [])
 
   useEffect(() => {
@@ -38,48 +45,88 @@ export function UserManagement() {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showRoleDropdown])
 
-  const fetchUsers = async () => {
+  const fetchUsers = async (page: number = 1, reset: boolean = false) => {
+    console.log(`fetchUsers called - page: ${page}, reset: ${reset}`)
     try {
-      setLoading(true)
+      if (reset) {
+        setLoading(true)
+        setUsers([])
+        setFilteredUsers([])
+      }
       setError(null)
       const supabase = createClient()
       
-             // Check if user is authenticated
-       const { data: { user } } = await supabase.auth.getUser()
-       if (!user) {
-         throw new Error('Not authenticated')
-       }
-
-       // Fetch current user's role to verify admin access
-       const { data: currentUserProfile } = await supabase
-         .from('profiles')
-         .select('role')
-         .eq('id', user.id)
-         .single()
-
-       if (currentUserProfile?.role !== 'admin') {
-         throw new Error('Unauthorized: Admin access required')
-       }
-       
-       // Fetch all users
-       const { data, error } = await supabase
-         .from('profiles')
-         .select('id, email, full_name, role, created_at')
-         .order('created_at', { ascending: false })
-
-       if (error) {
-         console.error('Supabase error:', error)
-         throw error
-       }
-       
-       console.log('Fetched users:', data)
-       setUsers(data || [])
-       setFilteredUsers(data || [])
+      // Simple auth check
+      const { data: { user } } = await supabase.auth.getUser()
       
-         } catch (err) {
-       console.error('Error fetching users:', err)
-       setError(err instanceof Error ? err.message : 'Failed to fetch users')
-     } finally {
+      if (!user) {
+        console.log('User not authenticated')
+        setError('Not authenticated - please log in')
+        setLoading(false)
+        return
+      }
+      
+      console.log('User authenticated:', user.email)
+
+      // Check admin role on first page only
+      if (page === 1) {
+        const { data: currentUserProfile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single()
+
+        if (currentUserProfile?.role !== 'admin') {
+          console.log('User is not admin:', currentUserProfile?.role)
+          setError('Unauthorized: Admin access required')
+          setLoading(false)
+          return
+        }
+        
+        console.log('Admin access confirmed')
+      }
+      
+      // Calculate pagination range
+      const from = (page - 1) * usersPerPage
+      const to = from + usersPerPage - 1
+      
+      console.log(`Fetching users page ${page}, range ${from}-${to}`)
+      
+      // Fetch users with pagination
+      const { data, error, count } = await supabase
+        .from('profiles')
+        .select('id, email, full_name, role, created_at', { count: 'exact' })
+        .order('created_at', { ascending: false })
+        .range(from, to)
+
+      if (error) {
+        console.error('Supabase error fetching users:', error)
+        setError(`Database error: ${error.message}`)
+        setUsers([])
+        setFilteredUsers([])
+      } else {
+        console.log(`Successfully fetched ${data?.length || 0} users for page ${page}`)
+        
+        if (reset) {
+          setUsers(data || [])
+          setFilteredUsers(data || [])
+        } else {
+          // Append to existing users for infinite scroll
+          setUsers(prev => [...prev, ...(data || [])])
+          setFilteredUsers(prev => [...prev, ...(data || [])])
+        }
+        
+        setTotalUsers(count || 0)
+        setHasMore((data?.length || 0) === usersPerPage)
+        setCurrentPage(page)
+      }
+      
+    } catch (err) {
+      console.error('Error fetching users:', err)
+      setError(err instanceof Error ? err.message : 'Failed to fetch users')
+      setUsers([])
+      setFilteredUsers([])
+    } finally {
       setLoading(false)
     }
   }
@@ -128,7 +175,7 @@ export function UserManagement() {
       if (error) throw error
       
       // Refresh users list
-      await fetchUsers()
+      await fetchUsers(1, true)
     } catch (err) {
       console.error('Error promoting user:', err)
       setError(err instanceof Error ? err.message : 'Failed to promote user')
@@ -160,7 +207,7 @@ export function UserManagement() {
       console.log(`✅ Role updated successfully to ${newRole}`)
       
       // Refresh the users list to ensure we have the latest data
-      await fetchUsers()
+      await fetchUsers(1, true)
       
       // Show success notification with additional info if reauth is required
       if (data.requiresReauth) {
@@ -173,18 +220,30 @@ export function UserManagement() {
       console.error('Error updating user role:', err)
       setError(err instanceof Error ? err.message : 'Failed to update user role')
       // Refresh users list to get correct state
-      await fetchUsers()
+      await fetchUsers(1, true)
     } finally {
       setUpdatingRole(null)
     }
   }
 
-  if (loading) {
+  if (loading && users.length === 0) {
     return (
       <div className="bg-white rounded-lg shadow-md p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-6 bg-gray-200 rounded w-1/4"></div>
-          <div className="space-y-3">
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-xl font-semibold text-gray-900">User Management</h2>
+            <button
+              onClick={() => {
+                console.log('Manual retry triggered')
+                fetchUsers(1, true)
+              }}
+              className="px-4 py-2 bg-[#0b6d41] text-white rounded-lg hover:bg-[#085530] transition-colors flex items-center gap-2"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Retry Loading
+            </button>
+          </div>
+          <div className="animate-pulse space-y-3">
             {[...Array(5)].map((_, i) => (
               <div key={i} className="h-16 bg-gray-200 rounded"></div>
             ))}
@@ -269,7 +328,7 @@ export function UserManagement() {
               <h2 className="text-xl font-semibold text-gray-900">User Management</h2>
             </div>
             <button
-              onClick={fetchUsers}
+              onClick={() => fetchUsers(1, true)}
               className="p-2 text-gray-600 hover:text-[#0b6d41] hover:bg-gray-100 rounded-lg transition-colors"
               title="Refresh"
             >
@@ -319,7 +378,7 @@ export function UserManagement() {
                 <span className="text-sm">{error}</span>
               </div>
               <button
-                onClick={fetchUsers}
+                onClick={() => fetchUsers(1, true)}
                 className="text-red-700 hover:text-red-900"
               >
                 <RefreshCw className="h-4 w-4" />
@@ -439,6 +498,36 @@ export function UserManagement() {
         {filteredUsers.length === 0 && !loading && (
           <div className="text-center py-8 text-gray-500">
             {searchTerm || roleFilter !== 'all' ? 'No users match your search criteria' : 'No users found'}
+          </div>
+        )}
+        
+        {/* Load More Button */}
+        {!searchTerm && roleFilter === 'all' && hasMore && filteredUsers.length > 0 && (
+          <div className="flex justify-center mt-6">
+            <button
+              onClick={() => fetchUsers(currentPage + 1)}
+              disabled={loading}
+              className="px-6 py-2 bg-[#0b6d41] text-white rounded-lg hover:bg-[#085530] disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Loading...
+                </>
+              ) : (
+                <>
+                  Load More Users
+                  <ChevronDown className="h-4 w-4" />
+                </>
+              )}
+            </button>
+          </div>
+        )}
+        
+        {/* Pagination Info */}
+        {!searchTerm && roleFilter === 'all' && totalUsers > 0 && (
+          <div className="text-center mt-4 text-sm text-gray-600">
+            Showing {users.length} of {totalUsers} total users
           </div>
         )}
       </div>

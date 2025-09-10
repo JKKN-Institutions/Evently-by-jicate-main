@@ -33,8 +33,9 @@ import {
 } from 'lucide-react'
 import React, { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/auth-context'
-import { getNavigationForRole, hasRole } from '@/lib/auth-helpers'
+import { getNavigationForRole, getNavigationForRoleAsync, hasRole } from '@/lib/auth-helpers'
 import { isAdminEmail } from '@/lib/config/admin-emails'
+import { createClient } from '@/lib/supabase/client'
 import Footer from './footer'
 
 // Icon mapping for navigation items
@@ -57,6 +58,14 @@ interface ModernSidebarProps {
   children: React.ReactNode
 }
 
+interface QuickStats {
+  totalEvents: number
+  thisMonthGrowth: string
+  activeUsers: number
+  totalTickets?: number
+  loading: boolean
+}
+
 export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   const pathname = usePathname()
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -64,23 +73,147 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [hasNotifications] = useState(true)
   const [loadingTimeout, setLoadingTimeout] = useState(false)
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false)
+  const [mounted, setMounted] = useState(false)
+  const [navigation, setNavigation] = useState<any[]>([])
+  const [quickStats, setQuickStats] = useState<QuickStats>({
+    totalEvents: 0,
+    thisMonthGrowth: '0%',
+    activeUsers: 0,
+    totalTickets: 0,
+    loading: true
+  })
   
   const { user, profile, loading, error, signOut } = useAuth()
+  const supabase = createClient()
 
   // Derive an effective role quickly to avoid flashing user menu for admins
-  const effectiveRole = profile?.role || (user?.email && isAdminEmail(user.email) ? 'admin' : 'user')
-  const effectiveProfile = profile || (user ? { id: user.id, email: user.email || '', full_name: user.email?.split('@')[0] || 'User', role: effectiveRole as any, avatar_url: null } : null)
+  // If we have a user but no profile yet, check if they're admin by email
+  const effectiveRole = profile?.role || (user?.email && isAdminEmail(user.email) ? 'admin' : null)
+  
+  // Only create effectiveProfile if we have determined a role
+  const effectiveProfile = profile || (effectiveRole && user ? { 
+    id: user.id, 
+    email: user.email || '', 
+    full_name: user.email?.split('@')[0] || 'User', 
+    role: effectiveRole as any, 
+    avatar_url: null 
+  } : null)
   
   // Debug logging only in dev
   if (process.env.NODE_ENV === 'development') {
     console.log('ProfessionalSidebar - Profile:', profile)
+    console.log('ProfessionalSidebar - User email:', user?.email)
+    console.log('ProfessionalSidebar - Is admin email?:', user?.email ? isAdminEmail(user.email) : 'no email')
     console.log('ProfessionalSidebar - Profile Role:', profile?.role, 'Effective Role:', effectiveRole)
   }
   
-  // Get navigation based on user role
-  const navigation = getNavigationForRole(effectiveProfile)
-  if (process.env.NODE_ENV === 'development') {
-    console.log('ProfessionalSidebar - Navigation items:', navigation.map(n => n.name))
+  // Load navigation based on user role
+  useEffect(() => {
+    const loadNavigation = async () => {
+      if (effectiveProfile) {
+        // Get initial navigation synchronously for immediate render
+        const initialNav = getNavigationForRole(effectiveProfile)
+        setNavigation(initialNav)
+        
+        // Then check for controller assignments for regular users
+        if (effectiveProfile.role === 'user') {
+          const asyncNav = await getNavigationForRoleAsync(effectiveProfile)
+          setNavigation(asyncNav)
+        }
+      } else {
+        setNavigation({})
+      }
+    }
+    
+    loadNavigation()
+  }, [effectiveProfile?.id, effectiveProfile?.role])
+
+  // Fetch real-time stats
+  const fetchQuickStats = async () => {
+    if (!effectiveProfile || !user) return
+
+    try {
+      setQuickStats(prev => ({ ...prev, loading: true }))
+
+      // Calculate date ranges
+      const now = new Date()
+      const startOfThisMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+      const startOfLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      const endOfLastMonth = new Date(now.getFullYear(), now.getMonth(), 0)
+
+      // Fetch total events count
+      const { count: totalEvents } = await supabase
+        .from('events')
+        .select('*', { count: 'exact', head: true })
+
+      // Fetch this month's events
+      const { count: thisMonthEvents } = await supabase
+        .from('events')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', startOfThisMonth.toISOString())
+
+      // Fetch last month's events for growth calculation
+      const { count: lastMonthEvents } = await supabase
+        .from('events')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', startOfLastMonth.toISOString())
+        .lte('created_at', endOfLastMonth.toISOString())
+
+      // Calculate growth percentage
+      let growthPercentage = '0%'
+      if (lastMonthEvents && lastMonthEvents > 0) {
+        const growth = ((thisMonthEvents || 0) - lastMonthEvents) / lastMonthEvents * 100
+        growthPercentage = growth >= 0 ? `+${growth.toFixed(1)}%` : `${growth.toFixed(1)}%`
+      } else if (thisMonthEvents && thisMonthEvents > 0) {
+        growthPercentage = '+100%'
+      }
+
+      // Fetch active users (users with recent activity - last 30 days)
+      const thirtyDaysAgo = new Date()
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+      
+      const { count: activeUsers } = await supabase
+        .from('profiles')
+        .select('*', { count: 'exact', head: true })
+        .gte('created_at', thirtyDaysAgo.toISOString())
+
+      // Fetch total tickets (optional - for admin view)
+      let totalTickets = 0
+      if (hasRole(effectiveProfile, 'admin')) {
+        const { count: ticketCount } = await supabase
+          .from('tickets')
+          .select('*', { count: 'exact', head: true })
+        totalTickets = ticketCount || 0
+      }
+
+      setQuickStats({
+        totalEvents: totalEvents || 0,
+        thisMonthGrowth: growthPercentage,
+        activeUsers: activeUsers || 0,
+        totalTickets,
+        loading: false
+      })
+
+    } catch (error) {
+      console.error('Error fetching quick stats:', error)
+      setQuickStats(prev => ({ ...prev, loading: false }))
+    }
+  }
+
+  // Fetch stats when profile is ready
+  useEffect(() => {
+    if (effectiveProfile && user && mounted) {
+      fetchQuickStats()
+      
+      // Refresh stats every 5 minutes
+      const interval = setInterval(fetchQuickStats, 5 * 60 * 1000)
+      return () => clearInterval(interval)
+    }
+  }, [effectiveProfile?.id, user?.id, mounted])
+  
+  if (process.env.NODE_ENV === 'development' && Object.keys(navigation).length > 0) {
+    console.log('ProfessionalSidebar - Navigation groups:', Object.keys(navigation))
   }
   
   // Check if on auth page
@@ -91,7 +224,12 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     return <>{children}</>
   }
   
-  // Set timeout for loading state
+  // Set mounted state to true after hydration
+  useEffect(() => {
+    setMounted(true)
+  }, [])
+  
+  // Set timeout for loading state and track initial load
   useEffect(() => {
     if (loading) {
       const timeout = setTimeout(() => {
@@ -100,19 +238,29 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
       }, 3000) // 3 second timeout
       
       return () => clearTimeout(timeout)
+    } else if (!initialLoadComplete) {
+      // Once loading is done, mark initial load as complete
+      setInitialLoadComplete(true)
     }
-  }, [loading])
+  }, [loading, initialLoadComplete])
   
-  // Show loading state briefly while auth initializes, but not if timeout exceeded
-  if (loading && !loadingTimeout) {
+  // Show loading state only on initial mount to avoid hydration mismatch
+  // Always render the full UI structure for consistent hydration
+  if (!mounted || ((loading && !user) || (user && !profile && !effectiveRole && !loadingTimeout))) {
+    // Return the full layout structure but with loading state content
+    // This ensures the DOM structure matches between server and client
     return (
-      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white">
-        <div className="text-center">
-          <div className="relative">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-[#0b6d41] border-t-transparent mx-auto"></div>
-            <div className="absolute inset-0 animate-ping rounded-full h-12 w-12 border-2 border-[#0b6d41] opacity-20 mx-auto"></div>
+      <div className="flex h-screen bg-gray-50">
+        <div className="flex-1 overflow-auto bg-gray-50">
+          <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white">
+            <div className="text-center">
+              <div className="relative">
+                <div className="animate-spin rounded-full h-12 w-12 border-4 border-[#0b6d41] border-t-transparent mx-auto"></div>
+                <div className="absolute inset-0 animate-ping rounded-full h-12 w-12 border-2 border-[#0b6d41] opacity-20 mx-auto"></div>
+              </div>
+              <p className="text-gray-600 text-sm mt-4 font-medium">Loading...</p>
+            </div>
           </div>
-          <p className="text-gray-600 text-sm mt-4 font-medium">Loading...</p>
         </div>
       </div>
     )
@@ -245,68 +393,136 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
           )}
         </div>
 
-        {/* Navigation - Clean and Crispy */}
+        {/* Navigation - Grouped and Clean */}
         <nav className="flex-1 px-4 py-6 overflow-y-auto">
-          <ul className="space-y-1.5">
-            {navigation.map((item, index) => {
-              const isActive = pathname === item.href || 
-                (item.href !== '/' && pathname.startsWith(item.href))
+          {Object.entries(navigation).map(([groupName, items]) => (
+            <div key={groupName} className="mb-8">
+              {/* Group Header */}
+              {desktopSidebarOpen && (
+                <div className="px-4 mb-3">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    {groupName}
+                  </h3>
+                </div>
+              )}
               
-              const IconComponent = iconMap[item.icon as keyof typeof iconMap] || Home
-              
-              return (
-                <li key={`${item.name}-${index}`} className="relative">
-                  <Link
-                    href={item.href}
-                    className={`relative flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
-                      isActive
-                        ? 'bg-gradient-to-r from-[#0b6d41] to-[#15a862] text-white shadow-md'
-                        : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                    }`}
-                  >
-                    <IconComponent className={`h-5 w-5 flex-shrink-0 ${!isActive && 'group-hover:scale-110'} transition-transform`} />
-                    {desktopSidebarOpen && (
-                      <>
-                        <span className="font-medium text-sm">{item.name}</span>
-                        {item.badge && (
-                          <span className="ml-auto px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full">
-                            {item.badge}
-                          </span>
+              {/* Group Items */}
+              <ul className="space-y-1.5">
+                {items.map((item: any, index: number) => {
+                  const isActive = pathname === item.href || 
+                    (item.href !== '/' && pathname.startsWith(item.href))
+                  
+                  const IconComponent = iconMap[item.icon as keyof typeof iconMap] || Home
+                  
+                  return (
+                    <li key={`${groupName}-${item.name}-${index}`} className="relative">
+                      <Link
+                        href={item.href}
+                        className={`relative flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${
+                          isActive
+                            ? 'bg-gradient-to-r from-[#0b6d41] to-[#15a862] text-white shadow-md'
+                            : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                        }`}
+                      >
+                        <IconComponent className={`h-5 w-5 flex-shrink-0 ${!isActive && 'group-hover:scale-110'} transition-transform`} />
+                        {desktopSidebarOpen && (
+                          <>
+                            <span className="font-medium text-sm">{item.name}</span>
+                            {item.badge && (
+                              <span className="ml-auto px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full">
+                                {item.badge}
+                              </span>
+                            )}
+                          </>
                         )}
-                      </>
-                    )}
-                    {!desktopSidebarOpen && (
-                      <div className="absolute left-full ml-3 px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-10 transition-opacity shadow-lg">
-                        {item.name}
-                      </div>
-                    )}
-                  </Link>
-                </li>
-              )
-            })}
-          </ul>
+                        {!desktopSidebarOpen && (
+                          <div className="absolute left-full ml-3 px-3 py-1.5 bg-gray-900 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-10 transition-opacity shadow-lg">
+                            {item.name}
+                          </div>
+                        )}
+                      </Link>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          ))}
 
-          {/* Quick Stats - Clean Card Design */}
+          {/* Quick Stats - Real-time Data */}
           {desktopSidebarOpen && (
             <div className="mt-8 p-5 bg-gradient-to-br from-gray-50 to-white rounded-2xl border border-gray-100">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-gray-700">Quick Stats</h3>
-                <TrendingUp className="h-4 w-4 text-green-500" />
+                {quickStats.loading ? (
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-gray-300 border-t-[#0b6d41]"></div>
+                ) : (
+                  <TrendingUp className={`h-4 w-4 ${
+                    quickStats.thisMonthGrowth.startsWith('+') ? 'text-green-500' : 
+                    quickStats.thisMonthGrowth.startsWith('-') ? 'text-red-500' : 'text-gray-400'
+                  }`} />
+                )}
               </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Total Events</span>
-                  <span className="text-sm font-bold text-gray-900">24</span>
+                  {quickStats.loading ? (
+                    <div className="w-8 h-4 bg-gray-200 rounded animate-pulse"></div>
+                  ) : (
+                    <span className="text-sm font-bold text-gray-900">
+                      {quickStats.totalEvents.toLocaleString()}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">This Month</span>
-                  <span className="text-sm font-bold text-green-600">+12%</span>
+                  {quickStats.loading ? (
+                    <div className="w-10 h-4 bg-gray-200 rounded animate-pulse"></div>
+                  ) : (
+                    <span className={`text-sm font-bold ${
+                      quickStats.thisMonthGrowth.startsWith('+') ? 'text-green-600' : 
+                      quickStats.thisMonthGrowth.startsWith('-') ? 'text-red-600' : 'text-gray-500'
+                    }`}>
+                      {quickStats.thisMonthGrowth}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-sm text-gray-500">Active Users</span>
-                  <span className="text-sm font-bold text-gray-900">1,234</span>
+                  {quickStats.loading ? (
+                    <div className="w-12 h-4 bg-gray-200 rounded animate-pulse"></div>
+                  ) : (
+                    <span className="text-sm font-bold text-gray-900">
+                      {quickStats.activeUsers.toLocaleString()}
+                    </span>
+                  )}
                 </div>
+                {hasRole(effectiveProfile, 'admin') && (
+                  <div className="flex items-center justify-between border-t border-gray-100 pt-3 mt-3">
+                    <span className="text-sm text-gray-500">Total Tickets</span>
+                    {quickStats.loading ? (
+                      <div className="w-12 h-4 bg-gray-200 rounded animate-pulse"></div>
+                    ) : (
+                      <span className="text-sm font-bold text-blue-600">
+                        {quickStats.totalTickets?.toLocaleString() || '0'}
+                      </span>
+                    )}
+                  </div>
+                )}
               </div>
+              {/* Last Updated */}
+              {!quickStats.loading && (
+                <div className="mt-4 pt-3 border-t border-gray-100">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400">Auto-refresh: 5min</span>
+                    <button
+                      onClick={fetchQuickStats}
+                      className="text-xs text-[#0b6d41] hover:text-[#0a5d37] font-medium"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </nav>
@@ -456,33 +672,45 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
             </button>
           </div>
 
-          {/* Navigation */}
+          {/* Navigation - Grouped */}
           <nav className="flex-1 px-4 py-6 overflow-y-auto">
-            <ul className="space-y-1.5">
-              {navigation.map((item) => {
-                const isActive = pathname === item.href || 
-                  (item.href !== '/' && pathname.startsWith(item.href))
+            {Object.entries(navigation).map(([groupName, items]) => (
+              <div key={groupName} className="mb-6">
+                {/* Group Header */}
+                <div className="px-4 mb-3">
+                  <h3 className="text-xs font-semibold text-gray-500 uppercase tracking-wider">
+                    {groupName}
+                  </h3>
+                </div>
                 
-                const IconComponent = iconMap[item.icon as keyof typeof iconMap] || Home
-                
-                return (
-                  <li key={item.name}>
-                    <Link
-                      href={item.href}
-                      onClick={() => setSidebarOpen(false)}
-                      className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
-                        isActive
-                          ? 'bg-gradient-to-r from-[#0b6d41] to-[#15a862] text-white shadow-md'
-                          : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                      }`}
-                    >
-                      <IconComponent className="h-5 w-5" />
-                      <span className="font-medium text-sm">{item.name}</span>
-                    </Link>
-                  </li>
-                )
-              })}
-            </ul>
+                {/* Group Items */}
+                <ul className="space-y-1.5">
+                  {items.map((item: any) => {
+                    const isActive = pathname === item.href || 
+                      (item.href !== '/' && pathname.startsWith(item.href))
+                    
+                    const IconComponent = iconMap[item.icon as keyof typeof iconMap] || Home
+                    
+                    return (
+                      <li key={`mobile-${groupName}-${item.name}`}>
+                        <Link
+                          href={item.href}
+                          onClick={() => setSidebarOpen(false)}
+                          className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${
+                            isActive
+                              ? 'bg-gradient-to-r from-[#0b6d41] to-[#15a862] text-white shadow-md'
+                              : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
+                          }`}
+                        >
+                          <IconComponent className="h-5 w-5" />
+                          <span className="font-medium text-sm">{item.name}</span>
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ))}
           </nav>
 
           {/* Mobile Actions */}

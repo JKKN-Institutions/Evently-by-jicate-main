@@ -224,57 +224,162 @@ export function hasRole(profile: UserProfile | null, role: 'user' | 'organizer' 
 }
 
 /**
- * Get navigation items based on user role
+ * Check if user has any controller assignments
  */
-export function getNavigationForRole(profile: UserProfile | null) {
-  const baseNavigation = [
-    { name: 'Home', href: '/', icon: 'Home' },
-    { name: 'Events', href: '/events', icon: 'Calendar' },
-    { name: 'My Bookings', href: '/bookings', icon: 'Ticket' },
-  ]
-  
-  if (!profile) return baseNavigation
-  
-  let navigation = [...baseNavigation]
-  
-  // Add controller dashboards - these will show for users who have the roles
-  // We'll add them for all authenticated users and let the pages themselves check permissions
-  navigation.push(
-    { name: 'Page Controller', href: '/page-controller', icon: 'Shield' },
-    { name: 'Event Controller', href: '/event-controller', icon: 'UserCheck' }
-  )
-  
+export async function hasControllerAssignments(userId: string): Promise<boolean> {
+  try {
+    const supabase = createClient()
+    
+    const { data, error } = await supabase
+      .from('role_assignments')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .in('role_type', ['page_controller', 'event_controller'])
+      .limit(1)
+    
+    if (error) {
+      console.error('Error checking controller assignments:', error)
+      return false
+    }
+    
+    return data && data.length > 0
+  } catch (error) {
+    console.error('Failed to check controller assignments:', error)
+    return false
+  }
+}
+
+/**
+ * Get grouped navigation items based on user role (async version with assignment check)
+ */
+export async function getNavigationForRoleAsync(profile: UserProfile | null): Promise<any> {
+  if (!profile) {
+    return {
+      'Main': [
+        { name: 'Home', href: '/', icon: 'Home' },
+        { name: 'Events', href: '/events', icon: 'Calendar' },
+        { name: 'My Bookings', href: '/bookings', icon: 'Ticket' },
+      ]
+    }
+  }
+
+  let navigationGroups: any = {
+    'Main': [
+      { name: 'Home', href: '/', icon: 'Home' },
+      { name: 'Events', href: '/events', icon: 'Calendar' },
+      { name: 'My Bookings', href: '/bookings', icon: 'Ticket' },
+    ]
+  }
+
   // Add organizer navigation
   if (hasRole(profile, 'organizer')) {
-    navigation.push(
+    navigationGroups['Controller Dashboards'] = [
+      { name: 'Page Dashboard', href: '/page-controller', icon: 'Shield' },
+      { name: 'Event Dashboard', href: '/event-controller', icon: 'UserCheck' }
+    ]
+    
+    navigationGroups['Organizer Tools'] = [
       { name: 'My Events', href: '/organizer/my-events', icon: 'Calendar' },
       { name: 'Payments', href: '/payments', icon: 'CreditCard' },
       { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' }
-    )
+    ]
+  } else if (profile.role === 'user') {
+    // For regular users, only show controller dashboards if they have assignments
+    const hasAssignments = await hasControllerAssignments(profile.id)
+    if (hasAssignments) {
+      navigationGroups['Controller Dashboards'] = [
+        { name: 'Page Dashboard', href: '/page-controller', icon: 'Shield' },
+        { name: 'Event Dashboard', href: '/event-controller', icon: 'UserCheck' }
+      ]
+    }
   }
-  
+
   // Add admin navigation
   if (hasRole(profile, 'admin')) {
-    // Only add Verify Tickets if not already added by organizer role
-    const hasVerifyTickets = navigation.some(item => item.name === 'Verify Tickets')
-    
-    navigation.push(
+    navigationGroups['Event Management'] = [
       { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' },
-      { name: 'Page Controllers', href: '/admin/page-controllers', icon: 'Shield' },
-      { name: 'User Management', href: '/admin/users', icon: 'Users' },
-      { name: 'Admin Payments', href: '/admin/payments', icon: 'CreditCard' },
-      { name: 'Analytics', href: '/admin/analytics', icon: 'BarChart3' }
-    )
-    
-    if (!hasVerifyTickets) {
-      navigation.push({ name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' })
-    }
-    
-    navigation.push(
+      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' }
+    ]
+
+    navigationGroups['User & Access'] = [
+      { name: 'Manage Controllers', href: '/admin/page-controllers', icon: 'Shield' },
+      { name: 'User Management', href: '/admin/users', icon: 'Users' }
+    ]
+
+    navigationGroups['Analytics & Reports'] = [
+      { name: 'Analytics', href: '/admin/analytics', icon: 'BarChart3' },
+      { name: 'Admin Payments', href: '/admin/payments', icon: 'CreditCard' }
+    ]
+
+    navigationGroups['Ticket Tools'] = [
       { name: 'Enhanced Ticket Generator', href: '/admin/enhanced-ticket-generator', icon: 'Ticket' },
       { name: 'Predefined Tickets', href: '/admin/predefined-tickets', icon: 'FolderOpen' }
-    )
+    ]
   }
-  
-  return navigation
+
+  return navigationGroups
+}
+
+/**
+ * Get navigation items based on user role (sync version for initial render)
+ */
+export function getNavigationForRole(profile: UserProfile | null) {
+  if (!profile) {
+    return {
+      'Main': [
+        { name: 'Home', href: '/', icon: 'Home' },
+        { name: 'Events', href: '/events', icon: 'Calendar' },
+        { name: 'My Bookings', href: '/bookings', icon: 'Ticket' },
+      ]
+    }
+  }
+
+  let navigationGroups: any = {
+    'Main': [
+      { name: 'Home', href: '/', icon: 'Home' },
+      { name: 'Events', href: '/events', icon: 'Calendar' },
+      { name: 'My Bookings', href: '/bookings', icon: 'Ticket' },
+    ]
+  }
+
+  // Add organizer navigation
+  if (hasRole(profile, 'organizer')) {
+    navigationGroups['Controller Dashboards'] = [
+      { name: 'Page Dashboard', href: '/page-controller', icon: 'Shield' },
+      { name: 'Event Dashboard', href: '/event-controller', icon: 'UserCheck' }
+    ]
+    
+    navigationGroups['Organizer Tools'] = [
+      { name: 'My Events', href: '/organizer/my-events', icon: 'Calendar' },
+      { name: 'Payments', href: '/payments', icon: 'CreditCard' },
+      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' }
+    ]
+  }
+  // Regular users: dashboards will be added dynamically if they have assignments
+
+  // Add admin navigation
+  if (hasRole(profile, 'admin')) {
+    navigationGroups['Event Management'] = [
+      { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' },
+      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' }
+    ]
+
+    navigationGroups['User & Access'] = [
+      { name: 'Manage Controllers', href: '/admin/page-controllers', icon: 'Shield' },
+      { name: 'User Management', href: '/admin/users', icon: 'Users' }
+    ]
+
+    navigationGroups['Analytics & Reports'] = [
+      { name: 'Analytics', href: '/admin/analytics', icon: 'BarChart3' },
+      { name: 'Admin Payments', href: '/admin/payments', icon: 'CreditCard' }
+    ]
+
+    navigationGroups['Ticket Tools'] = [
+      { name: 'Enhanced Ticket Generator', href: '/admin/enhanced-ticket-generator', icon: 'Ticket' },
+      { name: 'Predefined Tickets', href: '/admin/predefined-tickets', icon: 'FolderOpen' }
+    ]
+  }
+
+  return navigationGroups
 }
