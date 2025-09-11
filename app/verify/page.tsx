@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { QrCode, CheckCircle, XCircle, AlertCircle, Camera, X, Info, Loader2, Zap, Focus, ZoomIn, Flashlight, FlashlightOff, Volume2 } from 'lucide-react'
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode'
 import { SMALL_QR_CONFIG, getOptimalCamera } from '@/lib/small-qr-scanner'
-import { UltraRobustScanner } from '@/lib/ultra-robust-scanner'
+import { StableQRScanner } from '@/lib/stable-qr-scanner'
 
 export default function SimpleVerifyPage() {
   const [qrInput, setQrInput] = useState('')
@@ -26,7 +26,7 @@ export default function SimpleVerifyPage() {
     status?: string
   } | null>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
-  const robustScannerRef = useRef<UltraRobustScanner | null>(null)
+  const stableScannerRef = useRef<StableQRScanner | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const scanStartTime = useRef<number>(0)
   const successSound = useRef<HTMLAudioElement | null>(null)
@@ -99,17 +99,16 @@ export default function SimpleVerifyPage() {
     } catch (e) {}
   }
 
-  // Ultra-Robust scanner (GPay-style)
+  // Stable QR Scanner with manual zoom control
   useEffect(() => {
-    if (scannerActive && !robustScannerRef.current) {
+    if (scannerActive && !stableScannerRef.current) {
       // Small delay to ensure div is rendered
       const timer = setTimeout(async () => {
         setIsInitializing(true)
-        setScanningMode('Initializing GPay-style scanner...')
         
         try {
-          // Create ultra-robust scanner
-          const scanner = new UltraRobustScanner({
+          // Create stable scanner
+          const scanner = new StableQRScanner({
             elementId: 'qr-reader',
             onSuccess: (decodedText) => {
               console.log('✅ QR Code detected:', decodedText)
@@ -122,32 +121,27 @@ export default function SimpleVerifyPage() {
               console.error('Scanner error:', error)
               setScannerActive(false)
               alert(`Scanner error: ${error}`)
-            },
-            onStatusUpdate: (status) => {
-              setScanningMode(status)
-              console.log('Scanner status:', status)
             }
           })
           
-          robustScannerRef.current = scanner
+          stableScannerRef.current = scanner
           
-          // Start the ultra-robust scanner
+          // Start the scanner
           await scanner.start()
           
-          console.log('✅ Ultra-Robust QR scanner started (GPay-style)')
+          console.log('✅ Enhanced QR scanner started')
           
           // Get video element for additional controls
           setTimeout(() => {
             const videos = document.getElementsByTagName('video')
             if (videos.length > 0) {
               videoRef.current = videos[0]
-              // Auto-zoom is handled by the robust scanner internally
             }
           }, 500)
           
           // Show tips after 5 seconds
           setTimeout(() => {
-            if (robustScannerRef.current) {
+            if (stableScannerRef.current) {
               setShowTips(true)
             }
           }, 5000)
@@ -166,10 +160,10 @@ export default function SimpleVerifyPage() {
   }, [scannerActive])
 
   const stopScanner = async () => {
-    // Stop robust scanner if active
-    if (robustScannerRef.current) {
-      await robustScannerRef.current.stop()
-      robustScannerRef.current = null
+    // Stop stable scanner if active
+    if (stableScannerRef.current) {
+      await stableScannerRef.current.stop()
+      stableScannerRef.current = null
     }
     
     // Stop old scanner if active
@@ -235,9 +229,9 @@ export default function SimpleVerifyPage() {
   }
 
   const toggleTorch = async () => {
-    // Try robust scanner torch first
-    if (robustScannerRef.current) {
-      const newState = await robustScannerRef.current.toggleTorch()
+    // Try stable scanner torch first
+    if (stableScannerRef.current) {
+      const newState = await stableScannerRef.current.toggleTorch()
       setTorchOn(newState)
       return
     }
@@ -350,15 +344,10 @@ export default function SimpleVerifyPage() {
                     
                     {/* Status indicators */}
                     <div className="absolute top-2 left-2 space-y-2">
-                      <div className="bg-gradient-to-r from-green-600 to-blue-600 text-white px-3 py-1 rounded text-xs font-bold flex items-center">
-                        <Zap className="h-3 w-3 mr-1 animate-pulse" />
-                        GPay-Style Scanner
+                      <div className="bg-blue-600 text-white px-2 py-1 rounded text-xs font-medium flex items-center">
+                        <Camera className="h-3 w-3 mr-1" />
+                        Enhanced Scanner
                       </div>
-                      {scanningMode && scanningMode !== 'Initializing...' && (
-                        <div className="bg-purple-600 text-white px-2 py-1 rounded text-xs font-medium animate-pulse">
-                          {scanningMode}
-                        </div>
-                      )}
                       {zoomLevel > 1 && (
                         <div className="bg-green-600 text-white px-2 py-1 rounded text-xs font-medium">
                           Zoom: {zoomLevel.toFixed(1)}x
@@ -397,6 +386,45 @@ export default function SimpleVerifyPage() {
                     </div>
                   </div>
                   
+                  {/* Manual Zoom Control */}
+                  <div className="mt-4 bg-gray-100 dark:bg-gray-700 rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Manual Zoom</span>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          onClick={async () => {
+                            const newZoom = Math.max(1, zoomLevel - 0.5)
+                            if (stableScannerRef.current) {
+                              await stableScannerRef.current.setZoom(newZoom)
+                              setZoomLevel(newZoom)
+                            }
+                          }}
+                          className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm"
+                        >
+                          -
+                        </button>
+                        <span className="text-sm font-bold text-gray-700 dark:text-gray-300 min-w-[3rem] text-center">
+                          {zoomLevel.toFixed(1)}x
+                        </span>
+                        <button
+                          onClick={async () => {
+                            const newZoom = Math.min(5, zoomLevel + 0.5)
+                            if (stableScannerRef.current) {
+                              await stableScannerRef.current.setZoom(newZoom)
+                              setZoomLevel(newZoom)
+                            }
+                          }}
+                          className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white rounded text-sm"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                      Adjust zoom manually for better QR detection
+                    </p>
+                  </div>
+                  
                   {/* Small QR Scanning Tips */}
                   {showTips && (
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
@@ -407,11 +435,11 @@ export default function SimpleVerifyPage() {
                             Tips for Small Printed QR Codes:
                           </p>
                           <ul className="space-y-1 text-blue-700 dark:text-blue-400">
-                            <li>• <strong>Auto-zoom is active</strong> - it will adjust automatically</li>
+                            <li>• Use manual zoom controls to adjust</li>
                             <li>• Hold camera 6-12 inches from QR code</li>
                             <li>• Use the torch button for low light</li>
-                            <li>• Keep camera steady - auto-focus will engage</li>
-                            <li>• Sound alerts when QR is detected</li>
+                            <li>• Keep camera steady for better focus</li>
+                            <li>• Try zoom 1.5x-2x for small QR codes</li>
                           </ul>
                         </div>
                       </div>
