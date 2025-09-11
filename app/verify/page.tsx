@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { QrCode, CheckCircle, XCircle, AlertCircle, Camera, X, Info, Loader2, Zap, Focus, ZoomIn, Flashlight, FlashlightOff, Volume2 } from 'lucide-react'
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode'
 import { SMALL_QR_CONFIG, getOptimalCamera } from '@/lib/small-qr-scanner'
-import { StableQRScanner } from '@/lib/stable-qr-scanner'
+import { EnhancedQRDetector } from '@/lib/enhanced-qr-detector'
 
 export default function SimpleVerifyPage() {
   const [qrInput, setQrInput] = useState('')
@@ -14,6 +14,7 @@ export default function SimpleVerifyPage() {
   const [scanAttempts, setScanAttempts] = useState(0)
   const [showTips, setShowTips] = useState(false)
   const [zoomLevel, setZoomLevel] = useState(1)
+  const [detectionMode, setDetectionMode] = useState('High Quality')
   const [torchOn, setTorchOn] = useState(false)
   const [soundEnabled, setSoundEnabled] = useState(true)
   const [qrDetected, setQrDetected] = useState(false)
@@ -26,7 +27,7 @@ export default function SimpleVerifyPage() {
     status?: string
   } | null>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
-  const stableScannerRef = useRef<StableQRScanner | null>(null)
+  const enhancedDetectorRef = useRef<EnhancedQRDetector | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const scanStartTime = useRef<number>(0)
   const successSound = useRef<HTMLAudioElement | null>(null)
@@ -101,14 +102,14 @@ export default function SimpleVerifyPage() {
 
   // Stable QR Scanner with manual zoom control
   useEffect(() => {
-    if (scannerActive && !stableScannerRef.current) {
+    if (scannerActive && !enhancedDetectorRef.current) {
       // Small delay to ensure div is rendered
       const timer = setTimeout(async () => {
         setIsInitializing(true)
         
         try {
-          // Create stable scanner
-          const scanner = new StableQRScanner({
+          // Create enhanced detector with better QR recognition
+          const detector = new EnhancedQRDetector({
             elementId: 'qr-reader',
             onSuccess: (decodedText) => {
               console.log('✅ QR Code detected:', decodedText)
@@ -118,16 +119,19 @@ export default function SimpleVerifyPage() {
               verifyQRCode(decodedText)
             },
             onError: (error) => {
-              console.error('Scanner error:', error)
+              console.error('Detector error:', error)
               setScannerActive(false)
               alert(`Scanner error: ${error}`)
+            },
+            onStatusUpdate: (status) => {
+              setDetectionMode(status)
             }
           })
           
-          stableScannerRef.current = scanner
+          enhancedDetectorRef.current = detector
           
-          // Start the scanner
-          await scanner.start()
+          // Start the detector
+          await detector.start()
           
           console.log('✅ Enhanced QR scanner started')
           
@@ -141,7 +145,7 @@ export default function SimpleVerifyPage() {
           
           // Show tips after 5 seconds
           setTimeout(() => {
-            if (stableScannerRef.current) {
+            if (enhancedDetectorRef.current) {
               setShowTips(true)
             }
           }, 5000)
@@ -161,9 +165,9 @@ export default function SimpleVerifyPage() {
 
   const stopScanner = async () => {
     // Stop stable scanner if active
-    if (stableScannerRef.current) {
-      await stableScannerRef.current.stop()
-      stableScannerRef.current = null
+    if (enhancedDetectorRef.current) {
+      await enhancedDetectorRef.current.stop()
+      enhancedDetectorRef.current = null
     }
     
     // Stop old scanner if active
@@ -230,8 +234,8 @@ export default function SimpleVerifyPage() {
 
   const toggleTorch = async () => {
     // Try stable scanner torch first
-    if (stableScannerRef.current) {
-      const newState = await stableScannerRef.current.toggleTorch()
+    if (enhancedDetectorRef.current) {
+      const newState = await enhancedDetectorRef.current.toggleTorch()
       setTorchOn(newState)
       return
     }
@@ -394,8 +398,8 @@ export default function SimpleVerifyPage() {
                         <button
                           onClick={async () => {
                             const newZoom = Math.max(1, zoomLevel - 0.5)
-                            if (stableScannerRef.current) {
-                              await stableScannerRef.current.setZoom(newZoom)
+                            if (enhancedDetectorRef.current) {
+                              await enhancedDetectorRef.current.setZoom(newZoom)
                               setZoomLevel(newZoom)
                             }
                           }}
@@ -409,8 +413,8 @@ export default function SimpleVerifyPage() {
                         <button
                           onClick={async () => {
                             const newZoom = Math.min(5, zoomLevel + 0.5)
-                            if (stableScannerRef.current) {
-                              await stableScannerRef.current.setZoom(newZoom)
+                            if (enhancedDetectorRef.current) {
+                              await enhancedDetectorRef.current.setZoom(newZoom)
                               setZoomLevel(newZoom)
                             }
                           }}
@@ -422,6 +426,9 @@ export default function SimpleVerifyPage() {
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
                       Adjust zoom manually for better QR detection
+                    </p>
+                    <p className="text-xs text-center text-blue-600 dark:text-blue-400 mt-1">
+                      Detection Mode: {detectionMode}
                     </p>
                   </div>
                   
