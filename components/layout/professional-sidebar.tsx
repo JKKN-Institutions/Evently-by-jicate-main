@@ -51,7 +51,8 @@ const iconMap = {
   FolderOpen,
   Layers,
   Shield,
-  UserCheck
+  UserCheck,
+  Zap
 }
 
 interface ModernSidebarProps {
@@ -896,6 +897,11 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
                         >
                           <IconComponent className="h-5 w-5" />
                           <span className="font-medium text-sm">{item.name}</span>
+                          {item.badge && (
+                            <span className="ml-auto px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full">
+                              {item.badge}
+                            </span>
+                          )}
                         </Link>
                       </li>
                     )
