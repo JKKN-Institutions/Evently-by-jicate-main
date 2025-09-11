@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import { QrCode, CheckCircle, XCircle, AlertCircle, Camera, X, Info, Loader2 } from 'lucide-react'
+import { QrCode, CheckCircle, XCircle, AlertCircle, Camera, X, Info, Loader2, Zap, Focus, ZoomIn, Flashlight, FlashlightOff, Volume2 } from 'lucide-react'
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode'
 import { SMALL_QR_CONFIG, getOptimalCamera } from '@/lib/small-qr-scanner'
 
@@ -12,19 +12,42 @@ export default function SimpleVerifyPage() {
   const [isInitializing, setIsInitializing] = useState(false)
   const [scanAttempts, setScanAttempts] = useState(0)
   const [showTips, setShowTips] = useState(false)
+  const [zoomLevel, setZoomLevel] = useState(1)
+  const [torchOn, setTorchOn] = useState(false)
+  const [soundEnabled, setSoundEnabled] = useState(true)
+  const [qrDetected, setQrDetected] = useState(false)
+  const [autoZoomActive, setAutoZoomActive] = useState(false)
+  const [scanSpeed, setScanSpeed] = useState<number | null>(null)
   const [result, setResult] = useState<{
     success: boolean
     message: string
     status?: string
   } | null>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
+  const videoRef = useRef<HTMLVideoElement | null>(null)
+  const scanStartTime = useRef<number>(0)
+  const successSound = useRef<HTMLAudioElement | null>(null)
+  const focusSound = useRef<HTMLAudioElement | null>(null)
+  const autoZoomInterval = useRef<NodeJS.Timeout | null>(null)
 
   const verifyQRCode = async (qrData: string) => {
     if (!qrData.trim()) return
 
+    // Calculate scan speed
+    if (scanStartTime.current > 0) {
+      const scanTime = Date.now() - scanStartTime.current
+      setScanSpeed(scanTime)
+    }
+
     setVerifying(true)
     setResult(null)
     stopScanner()
+
+    // Play success sound and haptic feedback
+    playSound('success')
+    if ('vibrate' in navigator) {
+      navigator.vibrate([100, 50, 100])
+    }
 
     try {
       const response = await fetch('/api/tickets/verify-simple', {
@@ -49,6 +72,28 @@ export default function SimpleVerifyPage() {
   const startScanner = () => {
     setScannerActive(true)
     setResult(null)
+    setScanSpeed(null)
+    scanStartTime.current = Date.now()
+    setAutoZoomActive(true)
+  }
+
+  // Initialize audio
+  useEffect(() => {
+    successSound.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSiK0fPTgjMGHm7A7+OZURE')
+    successSound.current.volume = 0.7
+    focusSound.current = new Audio('data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBSiK0fPTgjMGHm7A7+OZURE')
+    focusSound.current.volume = 0.3
+  }, [])
+
+  const playSound = (type: 'success' | 'focus') => {
+    if (!soundEnabled) return
+    try {
+      if (type === 'success') {
+        successSound.current?.play().catch(() => {})
+      } else {
+        focusSound.current?.play().catch(() => {})
+      }
+    } catch (e) {}
   }
 
   // Enhanced scanner for small QR codes
@@ -91,7 +136,9 @@ export default function SimpleVerifyPage() {
             cameraId,
             config,
             (decodedText) => {
-              console.log('Small QR Code detected:', decodedText)
+              console.log('QR Code detected:', decodedText)
+              setQrDetected(true)
+              playSound('focus')
               setScanAttempts(0)
               verifyQRCode(decodedText)
             },
@@ -112,7 +159,16 @@ export default function SimpleVerifyPage() {
             }
           )
           
-          console.log('Enhanced QR scanner started for small QR codes')
+          console.log('Enhanced QR scanner started with auto-zoom')
+          
+          // Get video element for auto-zoom
+          setTimeout(() => {
+            const videos = document.getElementsByTagName('video')
+            if (videos.length > 0) {
+              videoRef.current = videos[0]
+              startAutoZoom()
+            }
+          }, 500)
         } catch (err) {
           console.error('Failed to start scanner:', err)
           setScannerActive(false)
@@ -131,9 +187,77 @@ export default function SimpleVerifyPage() {
       scannerRef.current.stop().then(() => {
         scannerRef.current = null
         setScannerActive(false)
+        setAutoZoomActive(false)
+        stopAutoZoom()
       }).catch((err) => {
         console.error('Failed to stop scanner:', err)
       })
+    }
+  }
+
+  // Auto-zoom functionality
+  const startAutoZoom = () => {
+    if (autoZoomInterval.current) return
+    
+    autoZoomInterval.current = setInterval(() => {
+      if (videoRef.current && autoZoomActive) {
+        adjustZoomAutomatically()
+      }
+    }, 1000)
+  }
+
+  const stopAutoZoom = () => {
+    if (autoZoomInterval.current) {
+      clearInterval(autoZoomInterval.current)
+      autoZoomInterval.current = null
+    }
+  }
+
+  const adjustZoomAutomatically = async () => {
+    if (!videoRef.current || !videoRef.current.srcObject) return
+    
+    const stream = videoRef.current.srcObject as MediaStream
+    const track = stream.getVideoTracks()[0]
+    
+    if (track && 'getCapabilities' in track) {
+      const capabilities = track.getCapabilities() as any
+      
+      if (capabilities.zoom) {
+        const currentZoom = (track.getSettings() as any).zoom || 1
+        
+        // Auto-adjust based on scan attempts
+        let targetZoom = currentZoom
+        if (scanAttempts > 10 && currentZoom < 2) {
+          targetZoom = Math.min(currentZoom * 1.2, capabilities.zoom.max || 3)
+        } else if (qrDetected && currentZoom > 1.5) {
+          targetZoom = Math.max(currentZoom * 0.9, 1)
+        }
+        
+        if (targetZoom !== currentZoom) {
+          await track.applyConstraints({
+            advanced: [{ zoom: targetZoom } as any]
+          })
+          setZoomLevel(targetZoom)
+        }
+      }
+    }
+  }
+
+  const toggleTorch = async () => {
+    if (!videoRef.current || !videoRef.current.srcObject) return
+    
+    const stream = videoRef.current.srcObject as MediaStream
+    const track = stream.getVideoTracks()[0]
+    
+    if (track && 'getCapabilities' in track) {
+      const capabilities = track.getCapabilities() as any
+      
+      if (capabilities.torch) {
+        await track.applyConstraints({
+          advanced: [{ torch: !torchOn } as any]
+        })
+        setTorchOn(!torchOn)
+      }
     }
   }
 
@@ -152,6 +276,10 @@ export default function SimpleVerifyPage() {
     setScannerActive(false)
     setShowTips(false)
     setScanAttempts(0)
+    setZoomLevel(1)
+    setTorchOn(false)
+    setQrDetected(false)
+    setScanSpeed(null)
   }
 
   return (
@@ -159,13 +287,22 @@ export default function SimpleVerifyPage() {
       <div className="max-w-md w-full">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8">
           <div className="text-center mb-8">
-            <QrCode className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+            <div className="relative inline-block">
+              <QrCode className="h-16 w-16 text-blue-600 mx-auto mb-4" />
+              <Zap className="h-6 w-6 text-yellow-400 absolute -top-1 -right-1 animate-pulse" />
+            </div>
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-              Ticket Verification
+              Enhanced Ticket Scanner
             </h1>
             <p className="text-gray-600 dark:text-gray-400 mt-2">
-              Scan or enter QR code data to verify ticket
+              Auto-zoom • Auto-detect • Lightning fast
             </p>
+            {scanSpeed && (
+              <div className="mt-2 inline-flex items-center px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm">
+                <Zap className="h-4 w-4 mr-1" />
+                Last scan: {(scanSpeed / 1000).toFixed(2)}s
+              </div>
+            )}
           </div>
 
           {!result ? (
@@ -190,10 +327,17 @@ export default function SimpleVerifyPage() {
                     {!isInitializing && (
                       <div className="absolute inset-0 pointer-events-none">
                         <div className="absolute inset-8 border-2 border-white rounded-lg opacity-50">
-                          <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-blue-400"></div>
-                          <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-blue-400"></div>
-                          <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-blue-400"></div>
-                          <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-blue-400"></div>
+                          {/* Animated scanning line */}
+                          <div className="absolute inset-x-0 h-0.5 bg-gradient-to-r from-transparent via-green-400 to-transparent" 
+                               style={{
+                                 animation: 'scan 2s ease-in-out infinite',
+                                 boxShadow: '0 0 10px rgba(74, 222, 128, 0.7)'
+                               }} />
+                          {/* Corner brackets with glow effect */}
+                          <div className="absolute top-0 left-0 w-4 h-4 border-t-4 border-l-4 border-blue-400 animate-pulse"></div>
+                          <div className="absolute top-0 right-0 w-4 h-4 border-t-4 border-r-4 border-blue-400 animate-pulse"></div>
+                          <div className="absolute bottom-0 left-0 w-4 h-4 border-b-4 border-l-4 border-blue-400 animate-pulse"></div>
+                          <div className="absolute bottom-0 right-0 w-4 h-4 border-b-4 border-r-4 border-blue-400 animate-pulse"></div>
                         </div>
                       </div>
                     )}
@@ -205,9 +349,47 @@ export default function SimpleVerifyPage() {
                       <X className="h-5 w-5" />
                     </button>
                     
-                    {/* Small QR indicator */}
-                    <div className="absolute top-2 left-2 bg-blue-600 text-white px-2 py-1 rounded text-xs font-medium">
-                      Optimized for Small QR
+                    {/* Status indicators */}
+                    <div className="absolute top-2 left-2 space-y-2">
+                      <div className="bg-blue-600 text-white px-2 py-1 rounded text-xs font-medium flex items-center">
+                        <ZoomIn className="h-3 w-3 mr-1" />
+                        Auto-Zoom {autoZoomActive ? 'ON' : 'OFF'}
+                      </div>
+                      {zoomLevel > 1 && (
+                        <div className="bg-green-600 text-white px-2 py-1 rounded text-xs font-medium">
+                          Zoom: {zoomLevel.toFixed(1)}x
+                        </div>
+                      )}
+                      {qrDetected && (
+                        <div className="bg-yellow-600 text-white px-2 py-1 rounded text-xs font-medium flex items-center animate-pulse">
+                          <Focus className="h-3 w-3 mr-1" />
+                          QR Detected
+                        </div>
+                      )}
+                    </div>
+                    
+                    {/* Control buttons */}
+                    <div className="absolute top-2 right-2 flex space-x-2">
+                      <button
+                        onClick={toggleTorch}
+                        className="bg-gray-800 hover:bg-gray-700 text-white p-2 rounded-full"
+                        title="Toggle flashlight"
+                      >
+                        {torchOn ? <Flashlight className="h-5 w-5" /> : <FlashlightOff className="h-5 w-5" />}
+                      </button>
+                      <button
+                        onClick={() => setSoundEnabled(!soundEnabled)}
+                        className="bg-gray-800 hover:bg-gray-700 text-white p-2 rounded-full"
+                        title="Toggle sound"
+                      >
+                        <Volume2 className={`h-5 w-5 ${soundEnabled ? '' : 'opacity-50'}`} />
+                      </button>
+                      <button
+                        onClick={stopScanner}
+                        className="bg-red-600 hover:bg-red-700 text-white p-2 rounded-full"
+                      >
+                        <X className="h-5 w-5" />
+                      </button>
                     </div>
                   </div>
                   
@@ -221,11 +403,11 @@ export default function SimpleVerifyPage() {
                             Tips for Small Printed QR Codes:
                           </p>
                           <ul className="space-y-1 text-blue-700 dark:text-blue-400">
-                            <li>• Hold camera 6-12 inches (15-30cm) from QR</li>
-                            <li>• Ensure QR fills 30-50% of the frame</li>
-                            <li>• Use good lighting, avoid shadows</li>
-                            <li>• Keep camera steady for 2-3 seconds</li>
-                            <li>• Try different angles if needed</li>
+                            <li>• <strong>Auto-zoom is active</strong> - it will adjust automatically</li>
+                            <li>• Hold camera 6-12 inches from QR code</li>
+                            <li>• Use the torch button for low light</li>
+                            <li>• Keep camera steady - auto-focus will engage</li>
+                            <li>• Sound alerts when QR is detected</li>
                           </ul>
                         </div>
                       </div>
@@ -340,6 +522,23 @@ export default function SimpleVerifyPage() {
           </p>
         </div>
       </div>
+      
+      {/* Add CSS for scan animation */}
+      <style jsx>{`
+        @keyframes scan {
+          0% {
+            transform: translateY(-100px);
+            opacity: 0;
+          }
+          50% {
+            opacity: 1;
+          }
+          100% {
+            transform: translateY(100px);
+            opacity: 0;
+          }
+        }
+      `}</style>
     </div>
   )
 }
