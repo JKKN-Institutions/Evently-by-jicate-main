@@ -23,12 +23,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Use service role to bypass RLS and force update
-    const serviceSupabase = createClient({ 
-      options: { 
-        db: { schema: 'public' },
-        auth: { persistSession: false }
-      } 
-    })
+    const serviceSupabase = await createClient()
 
     // First try to get existing profile
     const { data: existingProfile } = await serviceSupabase

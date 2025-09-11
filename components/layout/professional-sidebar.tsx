@@ -31,7 +31,7 @@ import {
   Activity,
   Layers
 } from 'lucide-react'
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { getNavigationForRole, getNavigationForRoleAsync, hasRole } from '@/lib/auth-helpers'
 import { isAdminEmail } from '@/lib/config/admin-emails'
@@ -86,32 +86,43 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   
   const { user, profile, loading, error, signOut } = useAuth()
   const supabase = createClient()
+  
+  // Debug log auth state
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🔍 ProfessionalSidebar Auth State:', {
+      user: user?.email,
+      profile: profile?.email, 
+      loading,
+      error,
+      timestamp: new Date().toISOString()
+    })
+  }
 
   // Derive an effective role quickly to avoid flashing user menu for admins
   // If we have a user but no profile yet, check if they're admin by email
   // Enhanced admin detection for production reliability
-  const effectiveRole = (() => {
+  const effectiveRole = useMemo(() => {
     // First priority: database profile role
     if (profile?.role) return profile.role
     
     // Second priority: admin email check
     if (user?.email && isAdminEmail(user.email)) {
-      console.log('🔧 ADMIN: Detected admin by email:', user.email)
+      if (process.env.NODE_ENV === 'development') console.log('🔧 ADMIN: Detected admin by email:', user.email)
       return 'admin'
     }
     
     // Third priority: fallback for specific admin emails (production safety)
     if (user?.email === 'sroja@jkkn.ac.in' || user?.email === 'director@jkkn.ac.in') {
-      console.log('🔧 ADMIN: Force-detected admin by hardcoded email:', user.email)
+      if (process.env.NODE_ENV === 'development') console.log('🔧 ADMIN: Force-detected admin by hardcoded email:', user.email)
       return 'admin'
     }
     
     // Default: no role determined yet
     return null
-  })()
+  }, [profile?.role, user?.email])
   
   // Enhanced debug logging for production admin detection
-  if (user?.email === 'sroja@jkkn.ac.in' || user?.email === 'director@jkkn.ac.in') {
+  if (process.env.NODE_ENV === 'development' && (user?.email === 'sroja@jkkn.ac.in' || user?.email === 'director@jkkn.ac.in')) {
     console.log('🔧 PRODUCTION ADMIN DEBUG:', {
       userEmail: user.email,
       profileRole: profile?.role,
@@ -156,15 +167,19 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
       } : null)
 
       if (profileForNav) {
-        console.log('🔧 Using profile for navigation:', {
-          email: profileForNav.email,
-          role: profileForNav.role,
-          source: effectiveProfile ? 'database' : 'fallback'
-        })
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔧 Using profile for navigation:', {
+            email: profileForNav.email,
+            role: profileForNav.role,
+            source: effectiveProfile ? 'database' : 'fallback'
+          })
+        }
         
         // Get initial navigation synchronously for immediate render
         const initialNav = getNavigationForRole(profileForNav)
-        console.log('🔧 Navigation groups loaded:', Object.keys(initialNav))
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🔧 Navigation groups loaded:', Object.keys(initialNav))
+        }
         setNavigation(initialNav)
         
         // Then check for controller assignments for regular users
@@ -192,15 +207,17 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     } : null)
 
     if (!profileForStats || !user) {
-      console.log('🔧 STATS: No profile or user for stats')
+      if (process.env.NODE_ENV === 'development') console.log('🔧 STATS: No profile or user for stats')
       return
     }
 
-    console.log('🔧 STATS: Fetching stats with profile:', {
-      role: profileForStats.role,
-      email: profileForStats.email,
-      retry: retryCount
-    })
+    if (process.env.NODE_ENV === 'development') {
+      console.log('🔧 STATS: Fetching stats with profile:', {
+        role: profileForStats.role,
+        email: profileForStats.email,
+        retry: retryCount
+      })
+    }
 
     try {
       setQuickStats(prev => ({ ...prev, loading: true }))
@@ -215,7 +232,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
         throw new Error(`Connection test failed: ${connectionError.message}`)
       }
 
-      console.log('🔧 STATS: Supabase connection successful')
+      if (process.env.NODE_ENV === 'development') console.log('🔧 STATS: Supabase connection successful')
 
       // Use Promise.allSettled for parallel queries with individual error handling
       const queries = [
@@ -281,14 +298,16 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
         growthPercentage = '+100%'
       }
 
-      console.log('🔧 STATS: Successfully fetched stats:', {
-        totalEvents,
-        thisMonthEvents,
-        lastMonthEvents,
-        activeUsers,
-        totalTickets,
-        growthPercentage
-      })
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔧 STATS: Successfully fetched stats:', {
+          totalEvents,
+          thisMonthEvents,
+          lastMonthEvents,
+          activeUsers,
+          totalTickets,
+          growthPercentage
+        })
+      }
 
       setQuickStats({
         totalEvents,
@@ -299,11 +318,11 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
       })
 
     } catch (error) {
-      console.error('🔧 STATS: Error fetching quick stats:', error)
+      if (process.env.NODE_ENV === 'development') console.error('🔧 STATS: Error fetching quick stats:', error)
       
       // Retry logic for production reliability
       if (retryCount < 2) {
-        console.log(`🔧 STATS: Retrying stats fetch (attempt ${retryCount + 1})`)
+        if (process.env.NODE_ENV === 'development') console.log(`🔧 STATS: Retrying stats fetch (attempt ${retryCount + 1})`)
         setTimeout(() => fetchQuickStats(retryCount + 1), 2000 * (retryCount + 1))
         return
       }
@@ -328,7 +347,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     //   const interval = setInterval(fetchQuickStats, 5 * 60 * 1000)
     //   return () => clearInterval(interval)
     // }
-    console.log('🔧 STATS: Quick Stats fetching temporarily disabled')
+    if (process.env.NODE_ENV === 'development') console.log('🔧 STATS: Quick Stats fetching temporarily disabled')
   }, [effectiveProfile?.id, effectiveRole, user?.id, mounted])
   
   if (process.env.NODE_ENV === 'development' && Object.keys(navigation).length > 0) {
@@ -353,7 +372,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
       if (lastRedirect) {
         const timeSince = Date.now() - parseInt(lastRedirect)
         if (timeSince < 30000) { // If less than 30 seconds old, clear it
-          console.log('🧹 Clearing recent redirect timestamp for immediate testing')
+          if (process.env.NODE_ENV === 'development') console.log('🧹 Clearing recent redirect timestamp for immediate testing')
           localStorage.removeItem('lastAuthRedirect')
         }
       }
@@ -364,7 +383,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   useEffect(() => {
     if (loading) {
       const timeout = setTimeout(() => {
-        console.warn('🔧 AUTH TIMEOUT: Loading timeout in ProfessionalSidebar - proceeding with fallback auth')
+        if (process.env.NODE_ENV === 'development') console.warn('🔧 AUTH TIMEOUT: Loading timeout in ProfessionalSidebar - proceeding with fallback auth')
         setLoadingTimeout(true)
       }, 15000) // Increased to 15 seconds for production
       
@@ -401,16 +420,18 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   }
   
   // Enhanced logging for debugging
-  console.log('🔍 ProfessionalSidebar auth check:', {
-    user: user ? `${user.email} (${user.id})` : 'null',
-    profile: profile ? `${profile.email} (${profile.role})` : 'null',
-    effectiveRole,
-    loading,
-    loadingTimeout,
-    mounted,
-    error,
-    pathname: typeof window !== 'undefined' ? window.location.pathname : 'server'
-  })
+  if (process.env.NODE_ENV === 'development') {
+    console.log('🔍 ProfessionalSidebar auth check:', {
+      user: user ? `${user.email} (${user.id})` : 'null',
+      profile: profile ? `${profile.email} (${profile.role})` : 'null',
+      effectiveRole,
+      loading,
+      loadingTimeout,
+      mounted,
+      error,
+      pathname: typeof window !== 'undefined' ? window.location.pathname : 'server'
+    })
+  }
 
   // IMPROVED: Smart redirect for unauthenticated users
   const isProduction = process.env.NODE_ENV === 'production'
@@ -423,7 +444,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     (isProduction ? loadingTimeout : true)
   
   if (shouldRedirect) {
-    console.log('❌ No user or effective role found after timeout, checking if redirect needed...')
+    if (process.env.NODE_ENV === 'development') console.log('❌ No user or effective role found after timeout, checking if redirect needed...')
     
     // Check if we're in a redirect loop by looking for recent redirects
     const now = Date.now()
@@ -438,11 +459,11 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
         !window.location.pathname.startsWith('/auth/') &&
         timeSinceLastRedirect > redirectCooldown) {
       
-      console.log('🔄 No authentication detected - redirecting to sign-in...')
+      if (process.env.NODE_ENV === 'development') console.log('🔄 No authentication detected - redirecting to sign-in...')
       localStorage.setItem('lastAuthRedirect', now.toString())
       window.location.replace('/auth/sign-in')
     } else if (timeSinceLastRedirect <= redirectCooldown) {
-      console.log(`⚠️ Redirect cooldown active (${Math.ceil((redirectCooldown - timeSinceLastRedirect) / 1000)}s remaining)`)
+      if (process.env.NODE_ENV === 'development') console.log(`⚠️ Redirect cooldown active (${Math.ceil((redirectCooldown - timeSinceLastRedirect) / 1000)}s remaining)`)
     }
     
     return (
@@ -458,7 +479,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   }
   
   // If we have a user, show success message
-  if (user) {
+  if (process.env.NODE_ENV === 'development' && user) {
     console.log('✅ User authenticated, showing main app:', {
       email: user.email,
       role: profile?.role,
@@ -773,9 +794,16 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
                     <span className="text-sm text-gray-700 font-medium">Help & Support</span>
                   </Link>
                   <button
-                    onClick={() => {
-                      signOut()
+                    onClick={async (e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      console.log('🚪 Sign out button clicked!')
                       setShowProfileMenu(false)
+                      try {
+                        await signOut()
+                      } catch (error) {
+                        console.error('❌ Sign out error:', error)
+                      }
                     }}
                     className="w-full flex items-center gap-3 px-4 py-3 hover:bg-red-50 transition-colors text-left group border-t border-gray-100"
                   >
@@ -929,9 +957,16 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
                     <span>Settings</span>
                   </Link>
                   <button
-                    onClick={() => {
-                      signOut()
+                    onClick={async (e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      console.log('🚪 Mobile sign out button clicked!')
                       setSidebarOpen(false)
+                      try {
+                        await signOut()
+                      } catch (error) {
+                        console.error('❌ Mobile sign out error:', error)
+                      }
                     }}
                     className="w-full flex items-center gap-3 px-3 py-2 text-sm text-red-500 hover:bg-red-50 rounded-lg transition-colors text-left"
                   >

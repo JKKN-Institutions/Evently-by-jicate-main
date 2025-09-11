@@ -74,5 +74,5 @@ export async function GET(request: Request) {
 
   // URL to redirect to after sign in process completes
   console.log('Redirecting to home page')
-  return NextResponse.redirect(`${origin}/`)
+  return NextResponse.redirect(`${origin}/?auth_callback=success`)
 }

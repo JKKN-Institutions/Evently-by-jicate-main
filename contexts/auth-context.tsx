@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, resetClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
 import { isAdminEmail } from '@/lib/config/admin-emails'
 
@@ -29,33 +29,31 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const isDev = process.env.NODE_ENV === 'development'
-  if (isDev) console.log('🚀 AuthProvider component mounted!')
   
-  // Initialize state from localStorage if available (for persistence across navigations)
+  // Initialize state with simpler logic
   const [state, setState] = useState<AuthState>(() => {
     if (typeof window === 'undefined') {
       return { user: null, profile: null, loading: true, error: null }
     }
     
-    // Check if we should clear cache
+    // Check if we just came from OAuth callback
     const urlParams = new URLSearchParams(window.location.search)
-    if (urlParams.get('clear_cache') === 'true') {
-      if (isDev) console.log('🧹 Clearing auth cache as requested')
+    const fromAuthCallback = urlParams.get('auth_callback') === 'success'
+    
+    if (fromAuthCallback) {
+      if (isDev) console.log('🔄 OAuth callback detected - starting fresh with no cache')
+      // Clear any cached state to force fresh session check
       localStorage.removeItem('auth_state_cache')
-      // Remove the clear_cache param from URL
-      urlParams.delete('clear_cache')
-      const newUrl = window.location.pathname + (urlParams.toString() ? `?${urlParams.toString()}` : '')
-      window.history.replaceState({}, '', newUrl)
       return { user: null, profile: null, loading: true, error: null }
     }
     
-    // Try to get cached auth state
+    // Try to get cached auth state for normal page loads
     const cachedAuth = localStorage.getItem('auth_state_cache')
     if (cachedAuth) {
       try {
         const parsed = JSON.parse(cachedAuth)
         if (isDev) console.log('📦 Restored auth state from cache:', parsed.profile?.email)
-        return { ...parsed, loading: true } // Still set loading to true to verify session
+        return { ...parsed, loading: true } // Still verify session
       } catch (e) {
         if (isDev) console.log('Failed to parse cached auth state')
       }
@@ -64,61 +62,64 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return { user: null, profile: null, loading: true, error: null }
   })
 
-  const supabase = useMemo(() => {
-    console.log('🔧 Creating Supabase client in AuthProvider')
-    return createClient()
-  }, [])
+  // Create a stable supabase client instance
+  const supabase = useMemo(() => createClient(), [])
   
-  // Immediate session check on mount
+  // Simplified session check on mount
   React.useEffect(() => {
-    console.log('🔥 IMMEDIATE session check on AuthProvider mount')
+    if (isDev) console.log('🔥 Starting session check on AuthProvider mount')
     
-    let loadingTimeout: NodeJS.Timeout | null = null
+    let mounted = true
     
-    // Only set timeout if we're actually loading
-    if (state.loading) {
-      loadingTimeout = setTimeout(() => {
-        setState(prev => {
-          // Only show warning if still loading
-          if (prev.loading) {
-            console.warn('⚠️ Auth check timeout - setting loading to false')
-            console.log('Timeout reached, current state:', prev)
-            return { ...prev, loading: false }
-          }
-          return prev
-        })
-      }, 30000) // 30 second timeout - increased for production Supabase connections
-    }
-    
-    const immediateCheck = async () => {
+    const checkSession = async () => {
       try {
-        console.log('Getting session from Supabase...')
+        // Check if we're coming from auth callback
+        const urlParams = new URLSearchParams(window.location.search)
+        const fromAuthCallback = urlParams.get('auth_callback') === 'success'
+        
+        if (fromAuthCallback) {
+          if (isDev) console.log('🔄 Coming from auth callback, waiting for session...')
+          // Give more time for session cookies to be properly set after OAuth
+          await new Promise(resolve => setTimeout(resolve, 1000))
+          
+          // Clean up the URL parameter
+          urlParams.delete('auth_callback')
+          const newUrl = window.location.pathname + (urlParams.toString() ? `?${urlParams.toString()}` : '')
+          window.history.replaceState({}, '', newUrl)
+        } else {
+          // Small delay for normal page loads
+          await new Promise(resolve => setTimeout(resolve, 200))
+        }
+        
+        if (isDev) console.log('🔍 Getting session from Supabase...')
         const { data: { session }, error: sessionError } = await supabase.auth.getSession()
         
         if (sessionError) {
-          console.error('🔥 Session error:', sessionError)
+          if (isDev) console.error('❌ Session error:', sessionError)
           setState({ user: null, profile: null, loading: false, error: sessionError.message })
-          if (loadingTimeout) clearTimeout(loadingTimeout)
           return
         }
         
-        if (isDev) console.log('🔥 IMMEDIATE session result:', session ? `Found: ${session.user?.email}` : 'None')
+        if (isDev) console.log('📍 Session result:', session ? `Found: ${session.user?.email}` : 'None')
         
         if (session?.user) {
-          if (isDev) console.log('🔥 IMMEDIATE: Setting user immediately')
+          if (isDev) console.log('👤 User found, fetching profile...')
           
-          // Always fetch fresh profile on mount to ensure we have the latest data
-          const { data: profile, error: profileError } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
+          // Fetch user profile
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', session.user.id)
+            .single()
           
-          if (profileError && profileError.code !== 'PGRST116') { // PGRST116 = no rows found
-            console.error('🔥 IMMEDIATE: Profile fetch error:', profileError)
+          if (profileError && profileError.code !== 'PGRST116') {
+            console.error('❌ Profile fetch error:', profileError)
           }
           
           if (profile) {
-            if (isDev) console.log('🔥 IMMEDIATE: Profile found:', profile)
+            if (isDev) console.log('✅ Profile found:', { email: profile.email, role: profile.role })
             const newState = { user: session.user, profile, loading: false, error: null }
             setState(newState)
-            if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout on success
             
             // Cache the auth state
             localStorage.setItem('auth_state_cache', JSON.stringify({
@@ -127,8 +128,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               error: null
             }))
           } else {
-            // No profile, create one
-            if (isDev) console.log('🔥 No profile found, creating one...')
+            // Create profile if it doesn't exist
+            if (isDev) console.log('📝 Creating new profile...')
             const userRole = isAdminEmail(session.user.email) ? 'admin' : 'user'
             
             const { data: newProfile, error: createError } = await supabase
@@ -136,7 +137,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .insert({
                 id: session.user.id,
                 email: session.user.email!,
-                full_name: session.user.user_metadata?.full_name || session.user.user_metadata?.name || session.user.email?.split('@')[0] || 'User',
+                full_name: session.user.user_metadata?.full_name || 
+                         session.user.user_metadata?.name || 
+                         session.user.email?.split('@')[0] || 'User',
                 role: userRole,
                 avatar_url: session.user.user_metadata?.avatar_url || null
               })
@@ -144,9 +147,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .single()
             
             if (newProfile && !createError) {
-              console.log('🔥 IMMEDIATE: Profile created:', newProfile)
+              if (isDev) console.log('✅ Profile created:', { email: newProfile.email, role: newProfile.role })
               setState({ user: session.user, profile: newProfile, loading: false, error: null })
-              if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout on success
               
               // Cache the auth state
               localStorage.setItem('auth_state_cache', JSON.stringify({
@@ -154,41 +156,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 profile: newProfile,
                 error: null
               }))
-            } else if (createError?.code === '23505') { // Duplicate key error
-              // Profile might already exist, try fetching again
-              const { data: existingProfile } = await supabase.from('profiles').select('*').eq('id', session.user.id).single()
-              if (existingProfile) {
-                setState({ user: session.user, profile: existingProfile, loading: false, error: null })
-                if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout on success
-              } else {
-                setState({ user: session.user, profile: null, loading: false, error: null })
-                if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout even without profile
-              }
             } else {
-              console.error('🔥 IMMEDIATE: Failed to create profile:', createError)
+              if (isDev) console.error('❌ Failed to create profile:', createError)
               setState({ user: session.user, profile: null, loading: false, error: null })
-              if (loadingTimeout) clearTimeout(loadingTimeout) // Clear timeout
             }
           }
         } else {
-          // No session, clear loading and cache
+          // No session found
+          if (isDev) console.log('❌ No session found')
           setState({ user: null, profile: null, loading: false, error: null })
           localStorage.removeItem('auth_state_cache')
         }
+        
       } catch (error) {
-        console.error('🔥 IMMEDIATE session check error:', error)
+        if (isDev) console.error('❌ Session check error:', error)
         setState({ user: null, profile: null, loading: false, error: null })
         localStorage.removeItem('auth_state_cache')
-      } finally {
-        clearTimeout(loadingTimeout)
       }
     }
     
-    immediateCheck()
+    // Start the check
+    checkSession()
     
-    // Cleanup
+    // Set a timeout to prevent infinite loading
+    const loadingTimeout = setTimeout(() => {
+      if (mounted) {
+        setState(prev => {
+          if (prev.loading) {
+            console.warn('⚠️ Auth check timeout - forcing loading to false')
+            return { ...prev, loading: false }
+          }
+          return prev
+        })
+      }
+    }, 15000) // 15 second timeout
+    
     return () => {
-      if (loadingTimeout) clearTimeout(loadingTimeout)
+      mounted = false
+      clearTimeout(loadingTimeout)
     }
   }, [supabase, isDev])
 
@@ -226,7 +231,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     }
     keysToRemove.forEach(key => {
-      console.log('🧹 Clearing stale auth key:', key)
+      if (isDev) console.log('🧹 Clearing stale auth key:', key)
       localStorage.removeItem(key)
     })
   }
@@ -253,22 +258,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                               window.location.search.includes('from_callback')
       
       if (cameFromCallback) {
-        console.log('🔄 Just came from OAuth callback, waiting for session sync...')
+        if (isDev) console.log('🔄 Just came from OAuth callback, waiting for session sync...')
         await new Promise(resolve => setTimeout(resolve, 1000))
       }
       
       // Get session from Supabase
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
       
-      console.log('📍 Session check:', session ? `Found for ${session.user?.email}` : 'None', sessionError ? `Error: ${sessionError.message}` : '')
+      if (isDev) console.log('📍 Session check:', session ? `Found for ${session.user?.email}` : 'None', sessionError ? `Error: ${sessionError.message}` : '')
       
       // If no session found but we came from callback, try to refresh
       if (!session && cameFromCallback) {
-        console.log('🔄 No session found after callback, attempting refresh...')
+        if (isDev) console.log('🔄 No session found after callback, attempting refresh...')
         const { data: { session: refreshedSession }, error: refreshError } = await supabase.auth.refreshSession()
         
         if (refreshedSession) {
-          console.log('✅ Session refreshed successfully:', refreshedSession.user?.email)
+          if (isDev) console.log('✅ Session refreshed successfully:', refreshedSession.user?.email)
           // Process the refreshed session
           const profile = await fetchProfile(refreshedSession.user.id)
           setState({ 
@@ -287,36 +292,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           return
         } else {
-          console.log('❌ Session refresh failed:', refreshError)
+          if (isDev) console.log('❌ Session refresh failed:', refreshError)
         }
       }
 
       if (!session || !session.user) {
         // No session, user is not logged in
-        console.log('❌ No session found, user not authenticated')
+        if (isDev) console.log('❌ No session found, user not authenticated')
         setState({ user: null, profile: null, loading: false, error: null })
         return
       }
 
-      console.log('✅ Session found for user:', session.user.email)
+      if (isDev) console.log('✅ Session found for user:', session.user.email)
 
       // Check if we already have this profile cached and it matches
       if (state.profile && state.profile.id === session.user.id) {
-        console.log('📦 Using cached profile for:', state.profile.email)
+        if (isDev) console.log('📦 Using cached profile for:', state.profile.email)
         setState(prev => ({ ...prev, user: session.user, loading: false }))
         return
       }
 
       // We have a user, fetch their profile
-      console.log('🔍 Fetching profile for user:', session.user.id)
+      if (isDev) console.log('🔍 Fetching profile for user:', session.user.id)
       const profile = await fetchProfile(session.user.id)
       
       // If no profile exists, create one
       if (!profile) {
-        console.log('📝 No profile found, creating new profile...')
+        if (isDev) console.log('📝 No profile found, creating new profile...')
         // Check if this email should be an admin
         const userRole = isAdminEmail(session.user.email) ? 'admin' : 'user'
-        console.log('👑 User role determined:', userRole)
+        if (isDev) console.log('👑 User role determined:', userRole)
         
         const { data: newProfile, error: createError } = await supabase
           .from('profiles')
@@ -331,7 +336,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .single()
 
         if (!createError && newProfile) {
-          console.log('✅ Profile created successfully:', newProfile)
+          if (isDev) console.log('✅ Profile created successfully:', newProfile)
           const newState = { user: session.user, profile: newProfile, loading: false, error: null }
           setState(newState)
           
@@ -342,11 +347,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             error: null
           }))
         } else {
-          console.error('❌ Failed to create profile:', createError)
+          if (isDev) console.error('❌ Failed to create profile:', createError)
           setState({ user: session.user, profile: null, loading: false, error: 'Failed to create profile' })
         }
       } else {
-        console.log('✅ Existing profile found:', profile)
+        if (isDev) console.log('✅ Existing profile found:', profile)
         const newState = { user: session.user, profile, loading: false, error: null }
         setState(newState)
         
@@ -363,10 +368,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const url = new URL(window.location.href)
         url.searchParams.delete('from_callback')
         window.history.replaceState({}, '', url.toString())
-        console.log('🧹 Cleaned up callback parameter from URL')
+        if (isDev) console.log('🧹 Cleaned up callback parameter from URL')
       }
     } catch (error) {
-      console.error('Auth initialization error:', error)
+      if (isDev) console.error('Auth initialization error:', error)
       setState({
         user: null,
         profile: null,
@@ -379,25 +384,65 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Sign out
   const signOut = async () => {
     try {
-      await supabase.auth.signOut()
+      if (isDev) console.log('🚪 Starting sign out process...')
+      
+      // Clear all localStorage items related to auth and Supabase
+      const keysToRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && (key.includes('supabase') || key.includes('auth') || key === 'lastAuthRedirect')) {
+          keysToRemove.push(key)
+        }
+      }
+      keysToRemove.forEach(key => {
+        if (isDev) console.log(`🧹 Removing localStorage key: ${key}`)
+        localStorage.removeItem(key)
+      })
+      
+      // Clear sessionStorage
+      sessionStorage.clear()
+      
+      // Clear state immediately
       setState({ user: null, profile: null, loading: false, error: null })
       
-      // Clear cached auth state
-      localStorage.removeItem('auth_state_cache')
+      // Sign out from Supabase
+      const { error } = await supabase.auth.signOut()
       
-      window.location.href = '/login'
+      if (error) {
+        if (isDev) console.error('⚠️ Supabase sign out error (continuing anyway):', error)
+      }
+      
+      if (isDev) console.log('✅ Sign out successful, redirecting to auth page...')
+      
+      // Force redirect to the sign-in page
+      window.location.href = '/auth/sign-in'
     } catch (error) {
-      console.error('Sign out error:', error)
+      if (isDev) console.error('❌ Sign out error:', error)
+      // Even on error, clear everything and redirect
+      
+      // Clear all auth-related localStorage
+      const keysToRemove: string[] = []
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i)
+        if (key && (key.includes('supabase') || key.includes('auth'))) {
+          keysToRemove.push(key)
+        }
+      }
+      keysToRemove.forEach(key => localStorage.removeItem(key))
+      
+      sessionStorage.clear()
+      setState({ user: null, profile: null, loading: false, error: null })
+      window.location.href = '/auth/sign-in'
     }
   }
 
   // Refresh profile
   const refreshProfile = async () => {
     if (state.user) {
-      console.log('🔄 Refreshing profile for user:', state.user.email)
+      if (isDev) console.log('🔄 Refreshing profile for user:', state.user.email)
       const profile = await fetchProfile(state.user.id)
       if (profile) {
-        console.log('✅ Profile refreshed:', profile)
+        if (isDev) console.log('✅ Profile refreshed:', profile)
         setState(prev => ({ ...prev, profile }))
         
         // Update cache
@@ -407,19 +452,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           error: null
         }))
       } else {
-        console.log('❌ No profile found during refresh')
+        if (isDev) console.log('❌ No profile found during refresh')
       }
     }
   }
 
   // Initialize on mount
   useEffect(() => {
-    console.log('🔄 AuthProvider useEffect triggered - initializing auth')
-    console.log('📊 Current state when useEffect runs:', state)
+    let isMounted = true
+    let initComplete = false
+    
+    if (isDev) {
+      console.log('🔄 AuthProvider useEffect triggered - initializing auth')
+      console.log('📊 Current state when useEffect runs:', state)
+    }
     
     // Force immediate execution
     const runInit = async () => {
-      console.log('🚀 Running initAuth...')
+      if (!isMounted || initComplete) return
+      initComplete = true
+      
+      if (isDev) console.log('🚀 Running initAuth...')
       await initAuth()
     }
     
@@ -427,9 +480,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     // Timeout to ensure loading doesn't get stuck
     const timeout = setTimeout(() => {
+      if (!isMounted) return
       setState(prev => {
         if (prev.loading) {
-          console.log('⏰ Loading timeout - forcing loading to false')
+          if (isDev) console.log('⏰ Loading timeout - forcing loading to false')
           return { ...prev, loading: false }
         }
         return prev
@@ -437,21 +491,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 20000) // 20 second timeout for production
 
     // Listen for auth changes
-    console.log('👂 Setting up auth state change listener...')
+    if (isDev) console.log('👂 Setting up auth state change listener...')
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      console.log('🔄 Auth state changed:', event, 'Session:', session ? 'Present' : 'None')
-      console.log('🔍 Current state before processing:', { 
-        user: state.user?.email, 
-        profile: state.profile?.email, 
-        loading: state.loading 
-      })
+      if (!isMounted) {
+        if (isDev) console.log('⚠️ Auth state change received but component unmounted')
+        return
+      }
+      
+      if (isDev) {
+        console.log('🔄 Auth state changed:', event, 'Session:', session ? 'Present' : 'None')
+        console.log('🔍 Current state before processing:', { 
+          user: state.user?.email, 
+          profile: state.profile?.email, 
+          loading: state.loading 
+        })
+      }
+      
+      // Skip INITIAL_SESSION event as we handle this in initAuth
+      if (event === 'INITIAL_SESSION') {
+        if (isDev) console.log('⏭️ Skipping INITIAL_SESSION event (handled in initAuth)')
+        return
+      }
       
       if (event === 'SIGNED_OUT') {
-        console.log('👋 User signed out')
+        if (isDev) console.log('👋 User signed out')
         setState({ user: null, profile: null, loading: false, error: null })
-      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED' || event === 'INITIAL_SESSION') {
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED') {
         if (session?.user) {
-          console.log('👤 Processing auth event for user:', session.user.email)
+          if (isDev) console.log('👤 Processing auth event for user:', session.user.email)
           
           // Set loading to false immediately to prevent redirect loops
           setState(prev => ({ ...prev, user: session.user, loading: false }))
@@ -461,10 +528,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           
           // If no profile exists, create one
           if (!profile) {
-            console.log('📝 Creating profile for auth state change...')
+            if (isDev) console.log('📝 Creating profile for auth state change...')
             // Check if this email should be an admin
             const userRole = isAdminEmail(session.user.email) ? 'admin' : 'user'
-            console.log('👑 Role for new profile:', userRole)
+            if (isDev) console.log('👑 Role for new profile:', userRole)
             
             const { data: newProfile, error: createError } = await supabase
               .from('profiles')
@@ -479,7 +546,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .single()
 
             if (!createError && newProfile) {
-              console.log('✅ Profile created via auth state change:', newProfile)
+              if (isDev) console.log('✅ Profile created via auth state change:', newProfile)
               const newState = { user: session.user, profile: newProfile, loading: false, error: null }
               setState(newState)
               
@@ -490,11 +557,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 error: null
               }))
             } else {
-              console.error('❌ Failed to create profile via auth state change:', createError)
+              if (isDev) console.error('❌ Failed to create profile via auth state change:', createError)
               setState({ user: session.user, profile: null, loading: false, error: 'Failed to create profile' })
             }
           } else {
-            console.log('✅ Using existing profile from auth state change:', profile)
+            if (isDev) console.log('✅ Using existing profile from auth state change:', profile)
             const newState = { user: session.user, profile, loading: false, error: null }
             setState(newState)
             
@@ -506,14 +573,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }))
           }
           
-          console.log('🎯 Final state after processing:', { 
-            user: session.user.email, 
-            profile: profile?.email, 
-            role: profile?.role,
-            loading: false 
-          })
+          if (isDev) {
+            console.log('🎯 Final state after processing:', { 
+              user: session.user.email, 
+              profile: profile?.email, 
+              role: profile?.role,
+              loading: false 
+            })
+          }
         } else {
-          console.log('❌ Auth event without user session')
+          if (isDev) console.log('❌ Auth event without user session')
           setState({ user: null, profile: null, loading: false, error: null })
           
           // Clear cached auth state
@@ -523,7 +592,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     })
 
     return () => {
-      console.log('🧹 Cleaning up AuthProvider useEffect')
+      isMounted = false
+      if (isDev) console.log('🧹 Cleaning up AuthProvider useEffect')
       subscription.unsubscribe()
       clearTimeout(timeout)
     }
@@ -544,7 +614,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           filter: `id=eq.${state.user.id}`
         },
         (payload) => {
-          console.log('Profile changed via realtime:', payload)
+          if (isDev) console.log('Profile changed via realtime:', payload)
           if (payload.new && typeof payload.new === 'object' && 'role' in payload.new) {
             setState(prev => ({
               ...prev,
@@ -589,7 +659,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (typeof window !== 'undefined') {
       (window as any).debugAuth = debugSessionCheck;
       (window as any).refreshProfile = refreshProfile;
-      console.log('🐛 DEBUG: Added window.debugAuth() and window.refreshProfile() functions for manual testing')
+      if (isDev) console.log('🐛 DEBUG: Added window.debugAuth() and window.refreshProfile() functions for manual testing')
     }
   }, [refreshProfile])
 
