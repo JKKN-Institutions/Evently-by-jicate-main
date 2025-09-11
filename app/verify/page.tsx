@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from 'react'
 import { QrCode, CheckCircle, XCircle, AlertCircle, Camera, X, Info, Loader2, Zap, Focus, ZoomIn, Flashlight, FlashlightOff, Volume2 } from 'lucide-react'
 import { Html5QrcodeScanner, Html5Qrcode } from 'html5-qrcode'
 import { SMALL_QR_CONFIG, getOptimalCamera } from '@/lib/small-qr-scanner'
+import { UltraRobustScanner } from '@/lib/ultra-robust-scanner'
 
 export default function SimpleVerifyPage() {
   const [qrInput, setQrInput] = useState('')
@@ -18,12 +19,14 @@ export default function SimpleVerifyPage() {
   const [qrDetected, setQrDetected] = useState(false)
   const [autoZoomActive, setAutoZoomActive] = useState(false)
   const [scanSpeed, setScanSpeed] = useState<number | null>(null)
+  const [scanningMode, setScanningMode] = useState<string>('Initializing...')
   const [result, setResult] = useState<{
     success: boolean
     message: string
     status?: string
   } | null>(null)
   const scannerRef = useRef<Html5Qrcode | null>(null)
+  const robustScannerRef = useRef<UltraRobustScanner | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const scanStartTime = useRef<number>(0)
   const successSound = useRef<HTMLAudioElement | null>(null)
@@ -96,79 +99,59 @@ export default function SimpleVerifyPage() {
     } catch (e) {}
   }
 
-  // Enhanced scanner for small QR codes
+  // Ultra-Robust scanner (GPay-style)
   useEffect(() => {
-    if (scannerActive && !scannerRef.current) {
+    if (scannerActive && !robustScannerRef.current) {
       // Small delay to ensure div is rendered
       const timer = setTimeout(async () => {
         setIsInitializing(true)
+        setScanningMode('Initializing GPay-style scanner...')
+        
         try {
-          const html5QrCode = new Html5Qrcode('qr-reader', {
-            verbose: false,
-            experimentalFeatures: {
-              useBarCodeDetectorIfSupported: true
-            }
-          } as any)
-          scannerRef.current = html5QrCode
-          
-          // Get optimal camera for scanning
-          const cameraId = await getOptimalCamera()
-          
-          if (!cameraId) {
-            throw new Error('No camera found')
-          }
-          
-          // Use enhanced configuration for small QR codes
-          const config = {
-            ...SMALL_QR_CONFIG,
-            fps: 30, // High FPS for small QR detection
-            qrbox: function(viewfinderWidth: number, viewfinderHeight: number) {
-              const minEdgeSize = Math.min(viewfinderWidth, viewfinderHeight)
-              const qrboxSize = Math.floor(minEdgeSize * 0.7) // 70% scan area
-              return {
-                width: qrboxSize,
-                height: qrboxSize
-              }
-            }
-          }
-          
-          await html5QrCode.start(
-            cameraId,
-            config,
-            (decodedText) => {
-              console.log('QR Code detected:', decodedText)
+          // Create ultra-robust scanner
+          const scanner = new UltraRobustScanner({
+            elementId: 'qr-reader',
+            onSuccess: (decodedText) => {
+              console.log('✅ QR Code detected:', decodedText)
               setQrDetected(true)
               playSound('focus')
               setScanAttempts(0)
               verifyQRCode(decodedText)
             },
-            (errorMessage) => {
-              // Track scan attempts for small QRs
-              if (!errorMessage.includes('NotFoundException')) {
-                console.log('Scan error:', errorMessage)
-              }
-              // Show tips after 5 seconds of scanning
-              if (scanAttempts === 0) {
-                setScanAttempts(1)
-                setTimeout(() => {
-                  if (scannerRef.current) {
-                    setShowTips(true)
-                  }
-                }, 5000)
-              }
+            onError: (error) => {
+              console.error('Scanner error:', error)
+              setScannerActive(false)
+              alert(`Scanner error: ${error}`)
+            },
+            onStatusUpdate: (status) => {
+              setScanningMode(status)
+              console.log('Scanner status:', status)
             }
-          )
+          })
           
-          console.log('Enhanced QR scanner started with auto-zoom')
+          robustScannerRef.current = scanner
           
-          // Get video element for auto-zoom
+          // Start the ultra-robust scanner
+          await scanner.start()
+          
+          console.log('✅ Ultra-Robust QR scanner started (GPay-style)')
+          
+          // Get video element for additional controls
           setTimeout(() => {
             const videos = document.getElementsByTagName('video')
             if (videos.length > 0) {
               videoRef.current = videos[0]
-              startAutoZoom()
+              // Auto-zoom is handled by the robust scanner internally
             }
           }, 500)
+          
+          // Show tips after 5 seconds
+          setTimeout(() => {
+            if (robustScannerRef.current) {
+              setShowTips(true)
+            }
+          }, 5000)
+          
         } catch (err) {
           console.error('Failed to start scanner:', err)
           setScannerActive(false)
@@ -180,19 +163,27 @@ export default function SimpleVerifyPage() {
       
       return () => clearTimeout(timer)
     }
-  }, [scannerActive, scanAttempts])
+  }, [scannerActive])
 
-  const stopScanner = () => {
+  const stopScanner = async () => {
+    // Stop robust scanner if active
+    if (robustScannerRef.current) {
+      await robustScannerRef.current.stop()
+      robustScannerRef.current = null
+    }
+    
+    // Stop old scanner if active
     if (scannerRef.current) {
       scannerRef.current.stop().then(() => {
         scannerRef.current = null
-        setScannerActive(false)
-        setAutoZoomActive(false)
-        stopAutoZoom()
       }).catch((err) => {
         console.error('Failed to stop scanner:', err)
       })
     }
+    
+    setScannerActive(false)
+    setAutoZoomActive(false)
+    stopAutoZoom()
   }
 
   // Auto-zoom functionality
@@ -244,6 +235,14 @@ export default function SimpleVerifyPage() {
   }
 
   const toggleTorch = async () => {
+    // Try robust scanner torch first
+    if (robustScannerRef.current) {
+      const newState = await robustScannerRef.current.toggleTorch()
+      setTorchOn(newState)
+      return
+    }
+    
+    // Fallback to manual torch control
     if (!videoRef.current || !videoRef.current.srcObject) return
     
     const stream = videoRef.current.srcObject as MediaStream
@@ -351,10 +350,15 @@ export default function SimpleVerifyPage() {
                     
                     {/* Status indicators */}
                     <div className="absolute top-2 left-2 space-y-2">
-                      <div className="bg-blue-600 text-white px-2 py-1 rounded text-xs font-medium flex items-center">
-                        <ZoomIn className="h-3 w-3 mr-1" />
-                        Auto-Zoom {autoZoomActive ? 'ON' : 'OFF'}
+                      <div className="bg-gradient-to-r from-green-600 to-blue-600 text-white px-3 py-1 rounded text-xs font-bold flex items-center">
+                        <Zap className="h-3 w-3 mr-1 animate-pulse" />
+                        GPay-Style Scanner
                       </div>
+                      {scanningMode && scanningMode !== 'Initializing...' && (
+                        <div className="bg-purple-600 text-white px-2 py-1 rounded text-xs font-medium animate-pulse">
+                          {scanningMode}
+                        </div>
+                      )}
                       {zoomLevel > 1 && (
                         <div className="bg-green-600 text-white px-2 py-1 rounded text-xs font-medium">
                           Zoom: {zoomLevel.toFixed(1)}x
