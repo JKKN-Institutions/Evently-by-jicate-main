@@ -42,13 +42,27 @@ export class FixedScanner {
       name: 'Tiny QR Focus',
       fps: 5,
       qrbox: { width: 150, height: 150 },
-      aspectRatio: 1.0
+      aspectRatio: 1.0,
+      zoom: 3,
+      focusDistance: 0.1
     },
     {
       name: 'Small Area Scan',
       fps: 10,
       qrbox: { width: 250, height: 250 },
-      aspectRatio: 1.0
+      aspectRatio: 1.0,
+      zoom: 2.5,
+      focusDistance: 0.15
+    },
+    {
+      name: 'Poster QR Mode',
+      fps: 8,
+      qrbox: { width: 200, height: 200 },
+      aspectRatio: 1.0,
+      zoom: 2.5,
+      focusDistance: 0.25,
+      contrast: 150,
+      brightness: 20
     },
     {
       name: 'Medium Coverage',
@@ -57,7 +71,9 @@ export class FixedScanner {
         const min = Math.min(width, height)
         return { width: Math.floor(min * 0.6), height: Math.floor(min * 0.6) }
       },
-      aspectRatio: 1.0
+      aspectRatio: 1.0,
+      zoom: 2,
+      focusDistance: 0.2
     },
     {
       name: 'Wide Detection',
@@ -66,10 +82,12 @@ export class FixedScanner {
         const min = Math.min(width, height)
         return { width: Math.floor(min * 0.8), height: Math.floor(min * 0.8) }
       },
-      aspectRatio: 1.0
+      aspectRatio: 1.0,
+      zoom: 1.5,
+      focusDistance: 0.3
     }
   ]
-  private currentConfigIndex: number = 0
+  private currentConfigIndex: number = 2 // Start with Poster QR Mode
 
   constructor(config: FixedScannerConfig) {
     this.config = config
@@ -102,8 +120,8 @@ export class FixedScanner {
       
       this.currentCameraId = cameraId
       
-      // Start with optimized configuration
-      await this.startWithConfig(cameraId, this.scanConfigs[0])
+      // Start with Poster QR Mode for better detection of low-contrast QRs
+      await this.startWithConfig(cameraId, this.scanConfigs[2]) // Index 2 is Poster QR Mode
       
       // Start multi-scale zoom cycling for tiny QRs
       this.startZoomCycling()
@@ -147,14 +165,16 @@ export class FixedScanner {
         facingMode: 'environment',
         advanced: [{
           focusMode: 'continuous',
-          focusDistance: 0.1, // 10cm for tiny QRs
+          focusDistance: config.focusDistance || 0.1, // Use config-specific distance
           exposureMode: 'continuous',
           whiteBalanceMode: 'continuous',
-          zoom: this.currentZoom,
-          iso: 800,
-          contrast: 100,
+          zoom: config.zoom || this.currentZoom,
+          iso: 1200, // Higher ISO for low contrast
+          contrast: config.contrast || 120, // Higher contrast for poster QRs
           sharpness: 100,
-          saturation: 80
+          saturation: 60, // Lower saturation for better contrast
+          brightness: config.brightness || 0,
+          exposureCompensation: 0.5 // Slight overexposure for white QRs
         } as any]
       }
     }
