@@ -283,7 +283,7 @@ export async function getNavigationForRoleAsync(profile: UserProfile | null): Pr
       { name: 'My Events', href: '/organizer/my-events', icon: 'Calendar' },
       { name: 'Payments', href: '/payments', icon: 'CreditCard' },
       { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/gpay', icon: 'Zap', badge: 'NEW' }
+      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
     ]
   } else if (profile.role === 'user') {
     // For regular users, only show controller dashboards if they have assignments
@@ -301,7 +301,7 @@ export async function getNavigationForRoleAsync(profile: UserProfile | null): Pr
     navigationGroups['Event Management'] = [
       { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' },
       { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/gpay', icon: 'Zap', badge: 'NEW' }
+      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
     ]
 
     navigationGroups['User & Access'] = [
@@ -356,7 +356,7 @@ export function getNavigationForRole(profile: UserProfile | null) {
       { name: 'My Events', href: '/organizer/my-events', icon: 'Calendar' },
       { name: 'Payments', href: '/payments', icon: 'CreditCard' },
       { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/gpay', icon: 'Zap', badge: 'NEW' }
+      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
     ]
   }
   // Regular users: dashboards will be added dynamically if they have assignments
@@ -366,7 +366,7 @@ export function getNavigationForRole(profile: UserProfile | null) {
     navigationGroups['Event Management'] = [
       { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' },
       { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/gpay', icon: 'Zap', badge: 'NEW' }
+      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
     ]
 
     navigationGroups['User & Access'] = [
