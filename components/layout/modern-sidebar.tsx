@@ -48,12 +48,9 @@ const organizerNavigation = [
 const adminNavigation = [
   { name: 'User Management', href: '/admin/users', icon: Users },
   { name: 'Admin Payments', href: '/admin/payments', icon: CreditCard },
-
   { name: 'Analytics', href: '/admin/analytics', icon: BarChart3 },
-  { name: 'Verify Tickets', href: '/verify', icon: CheckCircle },
   { name: 'Enhanced Ticket Generator', href: '/admin/enhanced-ticket-generator', icon: Ticket },
   { name: 'Predefined Tickets', href: '/admin/predefined-tickets', icon: ImageIcon },
-
 ]
 
 interface ModernSidebarProps {

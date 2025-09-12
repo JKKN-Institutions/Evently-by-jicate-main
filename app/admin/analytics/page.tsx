@@ -56,12 +56,21 @@ export default function SimplifiedAnalyticsPage() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set())
   const [expandedEvents, setExpandedEvents] = useState<Set<string>>(new Set())
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
+  const [authChecked, setAuthChecked] = useState(false)
+  const [quickLoadComplete, setQuickLoadComplete] = useState(false)
   const supabase = createClient()
 
   useEffect(() => {
+    // Check auth only once on mount
     checkAuth()
-    loadAnalytics()
-  }, [selectedCategory])
+  }, [])
+
+  useEffect(() => {
+    // Load analytics after auth is checked
+    if (authChecked) {
+      loadAnalytics()
+    }
+  }, [selectedCategory, authChecked])
 
   useEffect(() => {
     // Load all unique categories on mount
@@ -85,20 +94,29 @@ export default function SimplifiedAnalyticsPage() {
   }
 
   const checkAuth = async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) {
+        router.push('/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+
+      if (profile?.role !== 'admin') {
+        router.push('/')
+        return
+      }
+      
+      // Auth check passed
+      setAuthChecked(true)
+    } catch (error) {
+      console.error('Auth check error:', error)
       router.push('/login')
-      return
-    }
-
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
-    if (profile?.role !== 'admin') {
-      router.push('/')
     }
   }
 
@@ -107,38 +125,64 @@ export default function SimplifiedAnalyticsPage() {
       setLoading(true)
       console.log('Loading analytics data...')
 
-      // Load ALL events with their categories (no limit)
-      let eventsQuery = supabase
-        .from('events')
-        .select('id, title, category, start_date')
-        .order('category', { ascending: true })
-        .order('title', { ascending: true })
-        .limit(1000) // Explicitly set high limit
-
-      if (selectedCategory !== 'all') {
-        eventsQuery = eventsQuery.eq('category', selectedCategory)
+      // Load ALL events - use pagination if needed
+      const fetchAllEvents = async () => {
+        let allEvents: any[] = []
+        let offset = 0
+        const limit = 500
+        let hasMore = true
+        
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('events')
+            .select('id, title, category, start_date')
+            .range(offset, offset + limit - 1)
+            
+          if (error) {
+            console.error('Error fetching events batch:', error)
+            break
+          }
+          
+          if (data && data.length > 0) {
+            allEvents = [...allEvents, ...data]
+            offset += limit
+            hasMore = data.length === limit
+          } else {
+            hasMore = false
+          }
+        }
+        
+        return allEvents
       }
+      
+      let eventsData = await fetchAllEvents()
 
-      const { data: eventsData, error: eventsError } = await eventsQuery
-      if (eventsError) {
-        console.warn('Error loading events:', eventsError.message)
-        // Continue with empty events - don't block analytics
+      // Filter events by category if needed
+      if (selectedCategory !== 'all') {
+        eventsData = eventsData.filter(event => event.category === selectedCategory)
       }
       console.log(`Loaded ${eventsData?.length || 0} events`)
+      
+      if (!eventsData || eventsData.length === 0) {
+        console.log('No events found')
+        setCategories([])
+        setLoading(false)
+        return
+      }
 
-      // Load tickets with timeout protection and smaller batches
-      const ticketsPerPage = 500 // Reduced from 1000 for better performance
+      // Load ALL tickets with larger batches for complete data
+      const ticketsPerPage = 1000 // Increased for complete data
       let allTickets: any[] = []
       let hasMore = true
       let offset = 0
-      const maxBatches = 10 // Limit to 5000 tickets max for initial load
+      const maxBatches = 100 // Allow more batches to get all data
       let batchCount = 0
       
       console.log('Starting to load tickets...')
       
       // Create a timeout wrapper for the ticket loading
       const loadTicketsWithTimeout = async () => {
-        const timeoutMs = 15000 // 15 seconds timeout for all tickets
+        const timeoutMs = 30000 // 30 seconds timeout to allow complete data loading
         
         const timeoutPromise = new Promise((resolve) => {
           setTimeout(() => {
@@ -186,21 +230,61 @@ export default function SimplifiedAnalyticsPage() {
       const ticketsData = await loadTicketsWithTimeout()
       console.log(`Total tickets loaded: ${ticketsData.length}`)
 
-      // Load ALL predefined ticket templates (ticket_level field doesn't exist in table)
-      const { data: predefinedData, error: predefinedError } = await supabase
-        .from('predefined_tickets')
-        .select('event_id, ticket_type, name')
-        .limit(1000)
+      // Load ALL predefined ticket templates
+      const fetchAllPredefined = async () => {
+        let allPredefined: any[] = []
+        let offset = 0
+        const limit = 500
+        let hasMore = true
+        
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('predefined_tickets')
+            .select('event_id, ticket_type, name')
+            .range(offset, offset + limit - 1)
+            
+          if (error) {
+            console.error('Error fetching predefined batch:', error)
+            break
+          }
+          
+          if (data && data.length > 0) {
+            allPredefined = [...allPredefined, ...data]
+            offset += limit
+            hasMore = data.length === limit
+          } else {
+            hasMore = false
+          }
+        }
+        
+        return allPredefined
+      }
       
-      if (predefinedError) {
-        console.error('Error loading predefined tickets:', predefinedError)
+      let predefinedData = []
+      try {
+        predefinedData = await fetchAllPredefined()
+      } catch (error) {
+        console.error('Error loading predefined tickets:', error)
       }
       console.log(`Loaded ${predefinedData?.length || 0} predefined ticket templates`)
+      console.log('=== ANALYTICS DATA SUMMARY ===')
+      console.log(`Total Events: ${eventsData?.length || 0}`)
+      console.log(`Total Tickets: ${ticketsData?.length || 0}`)
+      console.log(`Total Templates: ${predefinedData?.length || 0}`)
+      console.log('===============================')
 
       // Process data into hierarchical structure
       const categoryMap = new Map<string, Category>()
 
-      eventsData?.forEach(event => {
+      // Ensure eventsData is an array before processing
+      if (!Array.isArray(eventsData)) {
+        console.error('Events data is not an array:', eventsData)
+        setCategories([])
+        setLoading(false)
+        return
+      }
+      
+      eventsData.forEach(event => {
         const categoryName = event.category || 'Uncategorized'
         
         if (!categoryMap.has(categoryName)) {
@@ -215,8 +299,8 @@ export default function SimplifiedAnalyticsPage() {
 
         const category = categoryMap.get(categoryName)!
         
-        // Get tickets for this event
-        const eventTickets = ticketsData?.filter(t => t.event_id === event.id) || []
+        // Get tickets for this event (ensure ticketsData is an array)
+        const eventTickets = Array.isArray(ticketsData) ? ticketsData.filter(t => t.event_id === event.id) : []
         
         // Group tickets by type and level
         const ticketTypeMap = new Map<string, Map<string, TicketData>>()

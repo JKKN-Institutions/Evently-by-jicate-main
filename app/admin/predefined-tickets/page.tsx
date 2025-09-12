@@ -29,13 +29,8 @@ interface PredefinedTicket {
 export default function PredefinedTicketsPage() {
   const { user, profile, loading: authLoading } = useAuth()
   const router = useRouter()
-  const [mounted, setMounted] = useState(false)
-  
-  // Ensure we're on the client side
-  useEffect(() => {
-    setMounted(true)
-    console.log('🎯 PredefinedTicketsPage mounted on client')
-  }, [])
+  // Component initialization
+  console.log('🎯 PredefinedTicketsPage rendering')
   
   // Derive effective role - same logic as professional-sidebar
   const effectiveRole = profile?.role || (user?.email && isAdminEmail(user.email) ? 'admin' : 'user')
@@ -79,37 +74,15 @@ export default function PredefinedTicketsPage() {
   const supabase = createClient()
 
   useEffect(() => {
-    console.log('🔍 PredefinedTickets useEffect triggered', { authLoading, isAdmin, user: user?.email, mounted })
-    
-    // Don't run on server side
-    if (!mounted) return
-    
-    // Fallback timeout to prevent any hanging (more generous timing)
-    const fallbackTimeout = setTimeout(() => {
-      console.warn('⚠️ FALLBACK TIMEOUT: Forcing page to render after 10 seconds')
-      setLoading(false)
-      // Ensure we have empty arrays if nothing loaded
-      setTickets(prev => prev.length > 0 ? prev : [])
-      setEvents(prev => prev.length > 0 ? prev : [])
-    }, 10000) // 10 second fallback timeout
+    console.log('🔍 PredefinedTickets useEffect triggered', { authLoading, isAdmin, user: user?.email })
     
     if (authLoading) {
       console.log('⏳ Still waiting for auth to load...')
-      // Don't wait forever for auth
-      const authTimeout = setTimeout(() => {
-        console.warn('⚠️ Auth loading timeout, assuming not admin')
-        router.replace('/')
-      }, 3000)
-      
-      return () => {
-        clearTimeout(authTimeout)
-        clearTimeout(fallbackTimeout)
-      }
+      return
     }
     
     if (!isAdmin) {
       console.log('🚫 User is not admin, redirecting to home')
-      clearTimeout(fallbackTimeout)
       router.replace('/')
       return
     }
@@ -117,147 +90,74 @@ export default function PredefinedTicketsPage() {
     const loadData = async () => {
       console.log('📊 Starting data load for predefined tickets page')
       
-      // Don't set loading to true if we're already past the timeout
-      if (!loading) return
-      
       try {
-        // Load both in parallel with individual error handling
-        console.log('🚀 Starting parallel data fetch...')
+        // Load tickets and events in parallel for faster loading
         const [ticketsResult, eventsResult] = await Promise.allSettled([
-          loadTickets().catch(err => {
-            console.error('loadTickets error:', err)
-            return null
-          }),
-          loadEvents().catch(err => {
-            console.error('loadEvents error:', err)  
-            return null
-          })
+          loadTickets(),
+          loadEvents()
         ])
         
-        console.log('📦 Data fetch completed:', {
-          tickets: ticketsResult.status,
-          events: eventsResult.status
-        })
-      } catch (error) {
-        console.error('💥 Critical error loading data:', error)
-      } finally {
+        if (ticketsResult.status === 'rejected') {
+          console.error('Failed to load tickets:', ticketsResult.reason)
+        }
+        if (eventsResult.status === 'rejected') {
+          console.error('Failed to load events:', eventsResult.reason)
+        }
+        
         console.log('✨ Data loading complete')
+      } catch (error) {
+        console.error('💥 Error loading data:', error)
+      } finally {
         setLoading(false)
-        clearTimeout(fallbackTimeout)
       }
     }
     
     loadData()
-    
-    return () => {
-      clearTimeout(fallbackTimeout)
-    }
-  }, [authLoading, isAdmin, mounted])
+  }, [authLoading, isAdmin, router])
 
-  // Early return for SSR or non-admin users
-  if (!mounted) {
+  // Early return for auth loading or non-admin users
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Initializing...</p>
-        </div>
-      </div>
-    )
-  }
-  
-  if (authLoading || !isAdmin) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">{authLoading ? 'Checking permissions...' : 'Admin access required'}</p>
-          {authLoading && (
-            <p className="text-xs text-gray-500 mt-2">Taking too long? Try refreshing the page.</p>
-          )}
+          <p className="mt-4 text-gray-600">Checking permissions...</p>
         </div>
       </div>
     )
   }
 
-  const loadEvents = async (retryCount = 0) => {
+  const loadEvents = async () => {
     try {
-      console.log(`Loading events from database... (attempt ${retryCount + 1})`)
+      console.log('Loading events from database...')
       
-      // First try to get user to ensure we're authenticated
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) {
-        console.error('User not authenticated, cannot load events')
-        setEvents([])
-        return
-      }
-      
-      // Test connection first
-      const { data: connectionTest, error: connectionError } = await supabase
+      // Simple, direct query without timeouts - include venue field
+      const { data, error } = await supabase
         .from('events')
-        .select('id')
-        .limit(1)
-
-      if (connectionError) {
-        console.warn('Connection test failed:', connectionError.message)
-        if (retryCount < 2) {
-          console.log(`Retrying events load (attempt ${retryCount + 1})`)
-          setTimeout(() => loadEvents(retryCount + 1), 3000 * (retryCount + 1))
-          return
-        }
+        .select('id, title, start_date, venue, category, description')
+        .limit(50)
+      
+      if (error) {
+        console.error('Events query error:', error)
         setEvents([])
         return
       }
 
-      console.log('Supabase connection successful for events')
-      
-      // Load events with timeout and error handling
-      const timeoutMs = 15000 // 15 seconds timeout for production
-      
-      const timeoutPromise = new Promise<any>((resolve) => {
-        setTimeout(() => {
-          console.warn(`Events query timed out after ${timeoutMs}ms`)
-          resolve({ data: [], error: new Error('Query timeout'), isTimeout: true })
-        }, timeoutMs)
-      })
-      
-      // Enhanced query with better field selection
-      const queryPromise = supabase
-        .from('events')
-        .select(`
-          id,
-          title,
-          description,
-          start_date,
-          venue,
-          category,
-          created_at
-        `)
-        .order('created_at', { ascending: false })
-        .limit(100)
-      
-      const result = await Promise.race([queryPromise, timeoutPromise])
-
-      if (result.error) {
-        console.warn('Events loading issue:', result.error.message)
-        
-        // Retry logic for production reliability  
-        if (retryCount < 2 && !result.isTimeout) {
-          console.log(`Retrying events load due to error (attempt ${retryCount + 2})`)
-          setTimeout(() => loadEvents(retryCount + 1), 2000 * (retryCount + 1))
-          return
-        }
-        
-        setEvents([])
-      } else if (result.data && Array.isArray(result.data)) {
-        console.log(`Successfully loaded ${result.data.length} events`)
-        setEvents(result.data)
+      if (data) {
+        console.log(`Successfully loaded ${data.length} events`)
+        // Log first few events to see venue data
+        console.log('Sample events with venues:', data.slice(0, 3).map(e => ({
+          title: e.title,
+          venue: e.venue,
+          start_date: e.start_date
+        })))
+        setEvents(data)
         
         // Auto-select first event if none selected
-        if (result.data.length > 0 && !selectedEventId) {
-          setSelectedEventId(result.data[0].id)
-          setSelectedEventCategory(result.data[0].category || '')
-          console.log('Auto-selected first event:', result.data[0].title)
+        if (data.length > 0 && !selectedEventId) {
+          setSelectedEventId(data[0].id)
+          setSelectedEventCategory(data[0].category || '')
+          console.log('Auto-selected first event:', data[0].title, '- Venue:', data[0].venue || 'No venue')
         }
       } else {
         console.log('No events found in database')
@@ -265,14 +165,6 @@ export default function PredefinedTicketsPage() {
       }
     } catch (error: any) {
       console.error('Events loading exception:', error)
-      
-      // Retry logic for production reliability
-      if (retryCount < 2) {
-        console.log(`Retrying events load due to exception (attempt ${retryCount + 2})`)
-        setTimeout(() => loadEvents(retryCount + 1), 3000 * (retryCount + 1))
-        return
-      }
-      
       setEvents([])
     }
   }
@@ -281,54 +173,19 @@ export default function PredefinedTicketsPage() {
     try {
       console.log('Loading predefined tickets...')
       
-      // Very generous timeout to handle slow connections
-      const timeoutMs = 20000 // 20 seconds timeout
-      
-      // Create timeout promise - but make it non-blocking
-      const timeoutPromise = new Promise((resolve) => {
-        setTimeout(() => {
-          console.info(`Tickets query taking longer than ${timeoutMs}ms - continuing without tickets`)
-          resolve({ data: [], error: null, isTimeout: true })
-        }, timeoutMs)
-      })
-      
-      // Create optimized query - smaller payload
-      const queryPromise = supabase
+      // Simple, direct query without timeout
+      const { data, error } = await supabase
         .from('predefined_tickets')
-        .select('id, name, description, template_url, qr_position, ticket_type, created_at, event_id')
-        .order('created_at', { ascending: false })
-        .limit(50) // Reduced limit for faster loading
+        .select('*')
+        .limit(50)
       
-      // Race between query and timeout
-      const result = await Promise.race([queryPromise, timeoutPromise]) as any
-
-      // Handle timeout gracefully - don't retry, just continue
-      if (result.isTimeout) {
-        console.info('Tickets loading is slow - continuing with empty list')
-        setTickets([])
-        setDbError(null) // Don't show error - page works fine
-        return
-      }
-      
-      if (result.error) {
-        // Log but don't block functionality
-        console.info('Tickets loading issue:', result.error.message || result.error)
-        
-        if (result.error.code === '42P01' || result.error.message?.includes('relation') || result.error.message?.includes('does not exist')) {
-          console.info('Predefined tickets table not found - you can still create new tickets')
-        } else if (result.error.code === 'PGRST301' || result.error.message?.includes('JWT')) {
-          console.info('Authentication issue - please refresh if needed')
-        } else if (result.error.code === '42703' || result.error.message?.includes('column')) {
-          console.info('Table schema mismatch - continuing without existing tickets')
-        }
-        
-        // Always continue - don't show errors to user
+      if (error) {
+        console.error('Tickets query error:', error)
         setTickets([])
         setDbError(null)
-      } else if (result.data) {
-        console.log(`Successfully loaded ${result.data.length} predefined tickets`)
-        setTickets(result.data)
-        setDbError(null)
+      } else if (data) {
+        console.log(`Successfully loaded ${data.length} predefined tickets`)
+        setTickets(data)
       } else {
         console.log('No tickets found')
         setTickets([])
@@ -339,9 +196,6 @@ export default function PredefinedTicketsPage() {
       console.info('Could not load tickets - continuing with empty list')
       setTickets([])
       setDbError(null) // Don't show errors - page is fully functional
-    } finally {
-      // Always set loading to false immediately to unblock UI
-      setLoading(false)
     }
   }
 

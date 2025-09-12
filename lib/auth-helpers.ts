@@ -274,16 +274,18 @@ export async function getNavigationForRoleAsync(profile: UserProfile | null): Pr
 
   // Add organizer navigation
   if (hasRole(profile, 'organizer')) {
-    navigationGroups['Controller Dashboards'] = [
-      { name: 'Page Dashboard', href: '/page-controller', icon: 'Shield' },
-      { name: 'Event Dashboard', href: '/event-controller', icon: 'UserCheck' }
-    ]
+    // Only show controller dashboards for pure organizers, not admins
+    if (profile.role === 'organizer') {
+      navigationGroups['Controller Dashboards'] = [
+        { name: 'Page Dashboard', href: '/page-controller', icon: 'Shield' },
+        { name: 'Event Dashboard', href: '/event-controller', icon: 'UserCheck' }
+      ]
+    }
     
     navigationGroups['Organizer Tools'] = [
       { name: 'My Events', href: '/organizer/my-events', icon: 'Calendar' },
       { name: 'Payments', href: '/payments', icon: 'CreditCard' },
-      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
+      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' }
     ]
   } else if (profile.role === 'user') {
     // For regular users, only show controller dashboards if they have assignments
@@ -299,9 +301,7 @@ export async function getNavigationForRoleAsync(profile: UserProfile | null): Pr
   // Add admin navigation
   if (hasRole(profile, 'admin')) {
     navigationGroups['Event Management'] = [
-      { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' },
-      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
+      { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' }
     ]
 
     navigationGroups['User & Access'] = [
@@ -347,16 +347,18 @@ export function getNavigationForRole(profile: UserProfile | null) {
 
   // Add organizer navigation
   if (hasRole(profile, 'organizer')) {
-    navigationGroups['Controller Dashboards'] = [
-      { name: 'Page Dashboard', href: '/page-controller', icon: 'Shield' },
-      { name: 'Event Dashboard', href: '/event-controller', icon: 'UserCheck' }
-    ]
+    // Only show controller dashboards for pure organizers, not admins
+    if (profile.role === 'organizer') {
+      navigationGroups['Controller Dashboards'] = [
+        { name: 'Page Dashboard', href: '/page-controller', icon: 'Shield' },
+        { name: 'Event Dashboard', href: '/event-controller', icon: 'UserCheck' }
+      ]
+    }
     
     navigationGroups['Organizer Tools'] = [
       { name: 'My Events', href: '/organizer/my-events', icon: 'Calendar' },
       { name: 'Payments', href: '/payments', icon: 'CreditCard' },
-      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
+      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' }
     ]
   }
   // Regular users: dashboards will be added dynamically if they have assignments
@@ -364,9 +366,7 @@ export function getNavigationForRole(profile: UserProfile | null) {
   // Add admin navigation
   if (hasRole(profile, 'admin')) {
     navigationGroups['Event Management'] = [
-      { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' },
-      { name: 'Verify Tickets', href: '/verify', icon: 'CheckCircle' },
-      { name: 'Pro Scanner', href: '/verify/pro', icon: 'Zap', badge: 'NEW' }
+      { name: 'Event Pages', href: '/admin/event-pages', icon: 'Layers' }
     ]
 
     navigationGroups['User & Access'] = [

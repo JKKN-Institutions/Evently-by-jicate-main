@@ -157,43 +157,33 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   
   // Load navigation based on user role
   useEffect(() => {
-    const loadNavigation = async () => {
-      // Use effectiveProfile OR create fallback profile with effectiveRole
-      const profileForNav = effectiveProfile || (effectiveRole && user ? {
-        id: user.id,
-        email: user.email || '',
-        full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
-        role: effectiveRole as any,
-        avatar_url: user.user_metadata?.avatar_url || null
-      } : null)
+    // Load navigation synchronously for instant rendering
+    const profileForNav = effectiveProfile || (effectiveRole && user ? {
+      id: user.id,
+      email: user.email || '',
+      full_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'User',
+      role: effectiveRole as any,
+      avatar_url: user.user_metadata?.avatar_url || null
+    } : null)
 
-      if (profileForNav) {
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🔧 Using profile for navigation:', {
-            email: profileForNav.email,
-            role: profileForNav.role,
-            source: effectiveProfile ? 'database' : 'fallback'
-          })
-        }
-        
-        // Get initial navigation synchronously for immediate render
-        const initialNav = getNavigationForRole(profileForNav)
-        if (process.env.NODE_ENV === 'development') {
-          console.log('🔧 Navigation groups loaded:', Object.keys(initialNav))
-        }
-        setNavigation(initialNav)
-        
-        // Then check for controller assignments for regular users
-        if (profileForNav.role === 'user') {
-          const asyncNav = await getNavigationForRoleAsync(profileForNav)
-          setNavigation(asyncNav)
-        }
-      } else {
-        setNavigation({})
+    if (profileForNav) {
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔧 Using profile for navigation:', {
+          email: profileForNav.email,
+          role: profileForNav.role,
+          source: effectiveProfile ? 'database' : 'fallback'
+        })
       }
+      
+      // Get navigation synchronously for immediate render
+      const nav = getNavigationForRole(profileForNav)
+      if (process.env.NODE_ENV === 'development') {
+        console.log('🔧 Navigation groups loaded:', Object.keys(nav))
+      }
+      setNavigation(nav)
+    } else {
+      setNavigation({})
     }
-    
-    loadNavigation()
   }, [effectiveProfile?.id, effectiveProfile?.role, effectiveRole, user?.id])
 
   // Fetch real-time stats with enhanced error handling for production
@@ -380,13 +370,13 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
     }
   }, [])
   
-  // Set timeout for loading state and track initial load - INCREASED FOR PRODUCTION
+  // Set timeout for loading state and track initial load - REDUCED FOR FASTER LOAD
   useEffect(() => {
     if (loading) {
       const timeout = setTimeout(() => {
         if (process.env.NODE_ENV === 'development') console.warn('🔧 AUTH TIMEOUT: Loading timeout in ProfessionalSidebar - proceeding with fallback auth')
         setLoadingTimeout(true)
-      }, 15000) // Increased to 15 seconds for production
+      }, 1000) // Reduced to 1 second for faster fallback
       
       return () => clearTimeout(timeout)
     } else if (!initialLoadComplete) {

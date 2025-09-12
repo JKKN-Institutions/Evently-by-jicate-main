@@ -100,7 +100,7 @@ export default function EventControllerDashboard() {
         const orderedResult = await supabase
           .from('events')
           .select('*')
-          .order('date', { ascending: false })
+          .order('start_date', { ascending: false })
         
         if (orderedResult.error) {
           console.log('Ordered query failed, trying without order...')

@@ -78,17 +78,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const fromAuthCallback = urlParams.get('auth_callback') === 'success'
         
         if (fromAuthCallback) {
-          if (isDev) console.log('🔄 Coming from auth callback, waiting for session...')
-          // Give more time for session cookies to be properly set after OAuth
-          await new Promise(resolve => setTimeout(resolve, 1000))
-          
+          if (isDev) console.log('🔄 Coming from auth callback, checking session immediately...')
           // Clean up the URL parameter
           urlParams.delete('auth_callback')
           const newUrl = window.location.pathname + (urlParams.toString() ? `?${urlParams.toString()}` : '')
           window.history.replaceState({}, '', newUrl)
-        } else {
-          // Small delay for normal page loads
-          await new Promise(resolve => setTimeout(resolve, 200))
         }
         
         if (isDev) console.log('🔍 Getting session from Supabase...')
