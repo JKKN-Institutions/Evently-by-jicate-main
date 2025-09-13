@@ -38,23 +38,9 @@ export async function middleware(request: NextRequest) {
     }
   )
 
-  // refreshing the session cookie
+  // Just refresh the session. Do not perform any redirects here.
+  // The client-side AuthProvider will handle all redirects.
   await supabase.auth.getSession()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  const url = new URL(request.url)
-  const isAuthPage = url.pathname.startsWith('/auth')
-
-  if (!user && !isAuthPage) {
-    return NextResponse.redirect(new URL('/auth/sign-in', request.url))
-  }
-
-  if (user && isAuthPage) {
-    return NextResponse.redirect(new URL('/', request.url))
-  }
 
   return response
 }
