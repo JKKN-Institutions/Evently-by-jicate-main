@@ -21,6 +21,9 @@ export default function SimpleVerifyPage() {
   const [autoZoomActive, setAutoZoomActive] = useState(false)
   const [scanSpeed, setScanSpeed] = useState<number | null>(null)
   const [scanningMode, setScanningMode] = useState<string>('Initializing...')
+  const [continuousMode, setContinuousMode] = useState(true)
+  const [scanCount, setScanCount] = useState(0)
+  const [lastScannedCode, setLastScannedCode] = useState<string | null>(null)
   const [result, setResult] = useState<{
     success: boolean
     message: string
@@ -37,6 +40,12 @@ export default function SimpleVerifyPage() {
   const verifyQRCode = async (qrData: string) => {
     if (!qrData.trim()) return
 
+    // Prevent duplicate scans of the same code
+    if (qrData === lastScannedCode) {
+      console.log('Duplicate scan ignored')
+      return
+    }
+
     // Calculate scan speed
     if (scanStartTime.current > 0) {
       const scanTime = Date.now() - scanStartTime.current
@@ -45,7 +54,13 @@ export default function SimpleVerifyPage() {
 
     setVerifying(true)
     setResult(null)
-    stopScanner()
+    setLastScannedCode(qrData)
+    setScanCount(prev => prev + 1)
+
+    // Don't stop scanner in continuous mode
+    if (!continuousMode) {
+      stopScanner()
+    }
 
     // Play success sound and haptic feedback
     playSound('success')
@@ -62,12 +77,30 @@ export default function SimpleVerifyPage() {
 
       const data = await response.json()
       setResult(data)
+
+      // In continuous mode, auto-clear result after showing
+      if (continuousMode) {
+        setTimeout(() => {
+          setResult(null)
+          setLastScannedCode(null) // Allow re-scanning same code after delay
+          scanStartTime.current = Date.now() // Reset scan timer
+        }, 3000) // Show result for 3 seconds
+      }
     } catch (error) {
       setResult({
         success: false,
         message: 'Verification failed',
         status: 'error'
       })
+
+      // Auto-clear error in continuous mode
+      if (continuousMode) {
+        setTimeout(() => {
+          setResult(null)
+          setLastScannedCode(null)
+          scanStartTime.current = Date.now()
+        }, 3000)
+      }
     } finally {
       setVerifying(false)
     }
@@ -276,6 +309,8 @@ export default function SimpleVerifyPage() {
     setTorchOn(false)
     setQrDetected(false)
     setScanSpeed(null)
+    setScanCount(0)
+    setLastScannedCode(null)
   }
 
   return (
@@ -293,22 +328,80 @@ export default function SimpleVerifyPage() {
             <p className="text-gray-600 dark:text-gray-400 mt-2">
               Auto-zoom • Auto-detect • Lightning fast
             </p>
-            {scanSpeed && (
-              <div className="mt-2 inline-flex items-center px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm">
-                <Zap className="h-4 w-4 mr-1" />
-                Last scan: {(scanSpeed / 1000).toFixed(2)}s
-              </div>
-            )}
+            <div className="flex items-center justify-center gap-4 mt-3">
+              {scanSpeed && (
+                <div className="inline-flex items-center px-3 py-1 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded-full text-sm">
+                  <Zap className="h-4 w-4 mr-1" />
+                  Last scan: {(scanSpeed / 1000).toFixed(2)}s
+                </div>
+              )}
+              {scanCount > 0 && (
+                <div className="inline-flex items-center px-3 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded-full text-sm">
+                  Scanned: {scanCount}
+                </div>
+              )}
+            </div>
           </div>
 
-          {!result ? (
+          {/* Continuous Mode Toggle */}
+          <div className="mb-4 bg-gray-100 dark:bg-gray-700 rounded-lg p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Continuous Scanning Mode
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Keep scanning after each verification
+                </p>
+              </div>
+              <button
+                onClick={() => setContinuousMode(!continuousMode)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  continuousMode ? 'bg-green-600' : 'bg-gray-300'
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                    continuousMode ? 'translate-x-6' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+            </div>
+          </div>
+
+          {!result || continuousMode ? (
             <div className="space-y-4">
               {/* Enhanced Camera Scanner for Small QR Codes */}
               {scannerActive ? (
                 <div className="space-y-4">
                   <div className="relative">
                     <div id="qr-reader" className="w-full rounded-lg overflow-hidden" />
-                    
+
+                    {/* Result overlay for continuous mode */}
+                    {result && continuousMode && (
+                      <div className="absolute inset-0 bg-black bg-opacity-70 flex items-center justify-center rounded-lg z-20">
+                        <div className={`text-center p-4 rounded-lg ${
+                          result.success ? 'bg-green-500' :
+                          result.status === 'used' ? 'bg-yellow-500' :
+                          'bg-red-500'
+                        }`}>
+                          <div className="text-white">
+                            {result.success ? (
+                              <CheckCircle className="h-16 w-16 mx-auto mb-2" />
+                            ) : result.status === 'used' ? (
+                              <AlertCircle className="h-16 w-16 mx-auto mb-2" />
+                            ) : (
+                              <XCircle className="h-16 w-16 mx-auto mb-2" />
+                            )}
+                            <h3 className="text-xl font-bold">{result.message}</h3>
+                            {result.success && (
+                              <p className="text-sm mt-1">Ticket #{(result as any).ticket_number}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Loading overlay */}
                     {isInitializing && (
                       <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center rounded-lg">
