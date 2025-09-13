@@ -98,7 +98,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (session?.user) {
           if (isDev) console.log('👤 User found, fetching profile...')
           
-          // Fetch user profile
+          // Fetch user profile - CRITICAL: Get fresh data
+          console.log('🔍 Fetching profile for user:', session.user.id, session.user.email)
           const { data: profile, error: profileError } = await supabase
             .from('profiles')
             .select('*')
@@ -110,7 +111,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
           
           if (profile) {
-            if (isDev) console.log('✅ Profile found:', { email: profile.email, role: profile.role })
+            // Always log in production for debugging
+            console.log('✅ Profile found:', { 
+              email: profile.email, 
+              role: profile.role,
+              id: profile.id,
+              timestamp: new Date().toISOString()
+            })
             const newState = { user: session.user, profile, loading: false, error: null }
             setState(newState)
             
@@ -141,7 +148,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               .single()
             
             if (newProfile && !createError) {
-              if (isDev) console.log('✅ Profile created:', { email: newProfile.email, role: newProfile.role })
+              // Always log for debugging
+              console.log('✅ Profile created:', { 
+                email: newProfile.email, 
+                role: newProfile.role,
+                reason: 'new_user_signup',
+                timestamp: new Date().toISOString()
+              })
               setState({ user: session.user, profile: newProfile, loading: false, error: null })
               
               // Cache the auth state
