@@ -490,13 +490,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     runInit()
     
-    // Set up periodic role refresh (every 30 seconds)
-    const intervalId = setInterval(() => {
-      if (state.user && !state.loading) {
-        if (isDev) console.log('⏰ Periodic role check...')
-        refreshProfile()
-      }
-    }, 30000)
+    // Note: Periodic refresh removed to avoid dependency issues
+    // Role will be refreshed on auth state changes and manual refresh
     
     // Timeout to ensure loading doesn't get stuck
     const timeout = setTimeout(() => {
@@ -616,9 +611,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isDev) console.log('🧹 Cleaning up AuthProvider useEffect')
       subscription.unsubscribe()
       clearTimeout(timeout)
-      clearInterval(intervalId)
     }
   }, []) // Empty dependency array to run only once on mount
+
+  // Set up periodic role refresh (separate effect with proper dependencies)
+  useEffect(() => {
+    if (!state.user || state.loading) return
+    
+    const intervalId = setInterval(async () => {
+      if (isDev) console.log('⏰ Periodic role check...')
+      
+      // Fetch fresh profile directly
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', state.user.id)
+        .single()
+      
+      if (profile && profile.role !== state.profile?.role) {
+        console.log('Role changed from', state.profile?.role, 'to', profile.role)
+        setState(prev => ({ ...prev, profile }))
+        
+        // Update cache
+        localStorage.setItem('auth_state_cache', JSON.stringify({
+          user: state.user,
+          profile,
+          error: null
+        }))
+        
+        // Reload if role changed
+        window.location.reload()
+      }
+    }, 30000) // Check every 30 seconds
+    
+    return () => clearInterval(intervalId)
+  }, [state.user?.id]) // Only re-setup when user ID changes
 
   // Set up realtime subscription for profile changes
   useEffect(() => {
