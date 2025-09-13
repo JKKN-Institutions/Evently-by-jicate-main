@@ -260,14 +260,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Clear any potentially stale auth data first
       clearStaleAuthData()
       
-      // If we just came from the callback, wait a bit for session to be fully processed
-      const cameFromCallback = document.referrer.includes('/auth/callback') || 
-                              window.location.search.includes('from_callback')
-      
-      if (cameFromCallback) {
-        if (isDev) console.log('🔄 Just came from OAuth callback, waiting for session sync...')
-        await new Promise(resolve => setTimeout(resolve, 1000))
-      }
+      // Skip callback waiting - it's causing hangs
+      const cameFromCallback = false
       
       // Get session from Supabase
       const { data: { session }, error: sessionError } = await supabase.auth.getSession()
@@ -496,8 +490,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!isMounted || initComplete) return
       initComplete = true
       
-      if (isDev) console.log('🚀 Running initAuth...')
-      await initAuth()
+      console.log('🚀 Running initAuth...') // Always log
+      try {
+        await initAuth()
+        console.log('✅ InitAuth completed')
+      } catch (error) {
+        console.error('❌ InitAuth failed:', error)
+        setState(prev => ({ ...prev, loading: false, error: 'Init failed' }))
+      }
     }
     
     runInit()
@@ -510,12 +510,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!isMounted) return
       setState(prev => {
         if (prev.loading) {
-          if (isDev) console.log('⏰ Loading timeout - forcing loading to false')
-          return { ...prev, loading: false }
+          console.log('⏰ Loading timeout - forcing loading to false after 5 seconds')
+          return { ...prev, loading: false, error: 'Authentication timeout' }
         }
         return prev
       })
-    }, 20000) // 20 second timeout for production
+    }, 5000) // 5 second timeout
 
     // Listen for auth changes
     if (isDev) console.log('👂 Setting up auth state change listener...')
@@ -626,38 +626,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []) // Empty dependency array to run only once on mount
 
-  // Set up periodic role refresh (separate effect with proper dependencies)
-  useEffect(() => {
-    if (!state.user || state.loading) return
-    
-    const intervalId = setInterval(async () => {
-      if (isDev) console.log('⏰ Periodic role check...')
-      
-      // Fetch fresh profile directly
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', state.user.id)
-        .single()
-      
-      if (profile && profile.role !== state.profile?.role) {
-        console.log('Role changed from', state.profile?.role, 'to', profile.role)
-        setState(prev => ({ ...prev, profile }))
-        
-        // Update cache
-        localStorage.setItem('auth_state_cache', JSON.stringify({
-          user: state.user,
-          profile,
-          error: null
-        }))
-        
-        // Reload if role changed
-        window.location.reload()
-      }
-    }, 30000) // Check every 30 seconds
-    
-    return () => clearInterval(intervalId)
-  }, [state.user?.id, state.profile?.role, state.loading, supabase, isDev]) // Include all dependencies
+  // Remove periodic refresh - it's causing infinite loops
+  // Role will be refreshed on auth state changes and manual refresh only
 
   // Set up realtime subscription for profile changes
   useEffect(() => {
