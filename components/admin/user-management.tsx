@@ -54,75 +54,40 @@ export function UserManagement() {
         setFilteredUsers([])
       }
       setError(null)
-      const supabase = createClient()
       
-      // Simple auth check
-      const { data: { user } } = await supabase.auth.getUser()
+      console.log('Fetching users from API endpoint...')
       
-      if (!user) {
-        console.log('User not authenticated')
-        setError('Not authenticated - please log in')
+      // Use the API endpoint instead of direct Supabase calls
+      const response = await fetch('/api/admin/users', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        credentials: 'include'
+      })
+      
+      const data = await response.json()
+      
+      if (!response.ok) {
+        console.error('API error:', data)
+        setError(data.error || 'Failed to fetch users')
+        setUsers([])
+        setFilteredUsers([])
         setLoading(false)
         return
       }
       
-      console.log('User authenticated:', user.email)
-
-      // Check admin role on first page only
-      if (page === 1) {
-        const { data: currentUserProfile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single()
-
-        if (currentUserProfile?.role !== 'admin') {
-          console.log('User is not admin:', currentUserProfile?.role)
-          setError('Unauthorized: Admin access required')
-          setLoading(false)
-          return
-        }
-        
-        console.log('Admin access confirmed')
-      }
+      console.log(`Successfully fetched ${data.users?.length || 0} users`)
       
-      // Calculate pagination range
-      const from = (page - 1) * usersPerPage
-      const to = from + usersPerPage - 1
-      
-      console.log(`Fetching users page ${page}, range ${from}-${to}`)
-      
-      // Fetch users with pagination
-      const { data, error, count } = await supabase
-        .from('profiles')
-        .select('id, email, full_name, role, created_at', { count: 'exact' })
-        .order('created_at', { ascending: false })
-        .range(from, to)
-
-      if (error) {
-        console.error('Supabase error fetching users:', error)
-        setError(`Database error: ${error.message}`)
-        setUsers([])
-        setFilteredUsers([])
-      } else {
-        console.log(`Successfully fetched ${data?.length || 0} users for page ${page}`)
-        
-        if (reset) {
-          setUsers(data || [])
-          setFilteredUsers(data || [])
-        } else {
-          // Append to existing users for infinite scroll
-          setUsers(prev => [...prev, ...(data || [])])
-          setFilteredUsers(prev => [...prev, ...(data || [])])
-        }
-        
-        setTotalUsers(count || 0)
-        setHasMore((data?.length || 0) === usersPerPage)
-        setCurrentPage(page)
-      }
+      // Set the users
+      setUsers(data.users || [])
+      setFilteredUsers(data.users || [])
+      setTotalUsers(data.count || 0)
+      setHasMore(false) // API returns all users for now
+      setCurrentPage(1)
       
     } catch (err) {
-      console.error('Error fetching users:', err)
+      console.error('Unexpected error fetching users:', err)
       setError(err instanceof Error ? err.message : 'Failed to fetch users')
       setUsers([])
       setFilteredUsers([])

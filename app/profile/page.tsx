@@ -2,6 +2,7 @@ import { createClient } from '@/lib/supabase/server'
 import { redirect } from 'next/navigation'
 import { User, Mail, Calendar, Ticket, CreditCard } from 'lucide-react'
 import Link from 'next/link'
+import { RoleRefresher } from '@/components/profile/role-refresher'
 
 async function getUserProfile() {
   const supabase = await createClient()
@@ -77,6 +78,9 @@ export default async function ProfilePage() {
             <p className="text-sm text-gray-500 mt-1">
               Member since {new Date(user.created_at).toLocaleDateString()}
             </p>
+            <div className="mt-3">
+              <RoleRefresher />
+            </div>
           </div>
         </div>
       </div>

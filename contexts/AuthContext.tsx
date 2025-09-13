@@ -34,6 +34,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       console.log('Fetching profile for user:', userId)
       
       // ALWAYS fetch fresh role from profiles table - this is the source of truth
+      // Clear any stale cache first
+      localStorage.removeItem(`user_role_${userId}`)
+      
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('role')
@@ -53,7 +56,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         
         if (!insertError) {
           setRole('user')
-          localStorage.setItem(`user_role_${userId}`, 'user')
         }
         return
       }
@@ -63,13 +65,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.log('Setting user role from profile to:', newRole)
         setRole(newRole)
         
-        // Store role in localStorage for persistence
-        localStorage.setItem(`user_role_${userId}`, newRole)
+        // Don't cache the role - always fetch fresh
+        // localStorage.setItem(`user_role_${userId}`, newRole)
       } else {
         // Default to user if no role found
         console.log('No role found in profile, defaulting to user')
         setRole('user')
-        localStorage.setItem(`user_role_${userId}`, 'user')
       }
     } catch (error) {
       console.error('Error fetching profile:', error)
@@ -141,8 +142,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.log('Role updated via real-time to:', newRole)
             setRole(newRole)
             
-            // Store in localStorage
-            localStorage.setItem(`user_role_${user.id}`, newRole)
+            // Don't cache - always use fresh data
+            // localStorage.setItem(`user_role_${user.id}`, newRole)
             
             // Optionally reload the page to ensure all components reflect the change
             // window.location.reload()

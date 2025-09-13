@@ -124,7 +124,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } else {
             // Create profile if it doesn't exist
             if (isDev) console.log('📝 Creating new profile...')
-            const userRole = isAdminEmail(session.user.email) ? 'admin' : 'user'
+            // Don't assign admin role automatically - let it be set manually in database
+            const userRole = 'user'
             
             const { data: newProfile, error: createError } = await supabase
               .from('profiles')
@@ -434,9 +435,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const refreshProfile = async () => {
     if (state.user) {
       if (isDev) console.log('🔄 Refreshing profile for user:', state.user.email)
-      const profile = await fetchProfile(state.user.id)
-      if (profile) {
+      
+      // Always fetch fresh from database
+      const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', state.user.id)
+        .single()
+      
+      if (profile && !error) {
         if (isDev) console.log('✅ Profile refreshed:', profile)
+        
+        // Check if role changed
+        const roleChanged = state.profile?.role !== profile.role
+        
         setState(prev => ({ ...prev, profile }))
         
         // Update cache
@@ -445,8 +457,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           profile,
           error: null
         }))
+        
+        // If role changed, reload to update UI
+        if (roleChanged) {
+          console.log('🔄 Role changed from', state.profile?.role, 'to', profile.role, '- reloading page')
+          window.location.reload()
+        }
       } else {
-        if (isDev) console.log('❌ No profile found during refresh')
+        if (isDev) console.log('❌ No profile found during refresh:', error)
       }
     }
   }
@@ -471,6 +489,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     
     runInit()
+    
+    // Set up periodic role refresh (every 30 seconds)
+    const intervalId = setInterval(() => {
+      if (state.user && !state.loading) {
+        if (isDev) console.log('⏰ Periodic role check...')
+        refreshProfile()
+      }
+    }, 30000)
     
     // Timeout to ensure loading doesn't get stuck
     const timeout = setTimeout(() => {
@@ -590,6 +616,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (isDev) console.log('🧹 Cleaning up AuthProvider useEffect')
       subscription.unsubscribe()
       clearTimeout(timeout)
+      clearInterval(intervalId)
     }
   }, []) // Empty dependency array to run only once on mount
 
