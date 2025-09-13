@@ -40,21 +40,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const fetchUserProfile = useCallback(async (userId: string) => {
     try {
       console.log('🔍 Fetching profile for user ID:', userId)
-      const { data: profile, error } = await supabase
+      
+      const fetchPromise = supabase
         .from('profiles')
-        .select('*')
+        .select('id, email, full_name, role, avatar_url') // Be more specific than '*'
         .eq('id', userId)
         .single()
 
+      // Add a timeout to the request to prevent infinite loading
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Profile fetch timed out after 8 seconds')), 8000)
+      );
+
+      // @ts-ignore
+      const { data: profile, error } = await Promise.race([fetchPromise, timeoutPromise]);
+
       if (error) {
-        console.error('❌ Profile fetch error:', error)
+        // Check if it's our custom timeout error
+        if (error.message.includes('timed out')) {
+            console.error('❌ PROFILE FETCH TIMED OUT. This confirms a severe database performance issue. The query to get your user profile is taking too long to complete. This is often caused by inefficient Row Level Security (RLS) policies or missing database indexes on the `profiles` table.');
+        } else {
+            console.error('❌ Profile fetch error:', error);
+        }
         return null
       }
 
       console.log('✅ Profile fetched:', { email: profile.email, role: profile.role })
       return profile
-    } catch (error) {
-      console.error('❌ Profile fetch exception:', error)
+    } catch (error: any) {
+      console.error('❌ Profile fetch exception:', error.message)
       return null
     }
   }, [supabase])
