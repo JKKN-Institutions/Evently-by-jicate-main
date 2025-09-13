@@ -60,7 +60,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [hasNotifications] = useState(true)
   
-  const { user, profile, loading, signOut } = useAuth()
+  const { user, profile, loading, error, signOut } = useAuth()
   
   const navigation = useMemo(() => {
     if (!profile) return {}
@@ -70,6 +70,26 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   const isOnAuthPage = useMemo(() => {
     return pathname.startsWith('/auth/')
   }, [pathname])
+
+  if (error) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-gradient-to-br from-gray-50 to-white">
+        <div className="text-center bg-white p-8 rounded-2xl shadow-xl border border-gray-100">
+          <div className="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-4">
+            <X className="h-8 w-8 text-red-500" />
+          </div>
+          <h3 className="text-lg font-semibold text-gray-900 mb-2">Connection Error</h3>
+          <p className="text-red-600 text-sm mb-4">{error}</p>
+          <button 
+            onClick={() => window.location.reload()} 
+            className="px-6 py-2.5 bg-[#0b6d41] text-white rounded-xl hover:bg-[#0a5d37] transition-colors font-medium shadow-sm"
+          >
+            Try Again
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   if (isOnAuthPage) {
     return <>{children}</>

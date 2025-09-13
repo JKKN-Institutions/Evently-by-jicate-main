@@ -38,40 +38,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Fetch user profile from database
   const fetchUserProfile = useCallback(async (userId: string) => {
-    try {
-      console.log('🔍 Fetching profile for user ID:', userId)
-      
-      const fetchPromise = supabase
-        .from('profiles')
-        .select('id, email, full_name, role, avatar_url') // Be more specific than '*'
-        .eq('id', userId)
-        .single()
+    const MAX_RETRIES = 3;
+    for (let i = 0; i < MAX_RETRIES; i++) {
+      try {
+        console.log(`🔍 Fetching profile for user ID: ${userId} (Attempt ${i + 1}/${MAX_RETRIES})`);
+        
+        const fetchPromise = supabase
+          .from('profiles')
+          .select('id, email, full_name, role, avatar_url')
+          .eq('id', userId)
+          .single();
 
-      // Add a timeout to the request to prevent infinite loading
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Profile fetch timed out after 8 seconds')), 8000)
-      );
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Profile fetch timed out after 8 seconds')), 8000)
+        );
+        
+        // @ts-ignore
+        const { data: profile, error } = await Promise.race([fetchPromise, timeoutPromise]);
 
-      // @ts-ignore
-      const { data: profile, error } = await Promise.race([fetchPromise, timeoutPromise]);
-
-      if (error) {
-        // Check if it's our custom timeout error
-        if (error.message.includes('timed out')) {
-            console.error('❌ PROFILE FETCH TIMED OUT. This confirms a severe database performance issue. The query to get your user profile is taking too long to complete. This is often caused by inefficient Row Level Security (RLS) policies or missing database indexes on the `profiles` table.');
-        } else {
-            console.error('❌ Profile fetch error:', error);
+        if (error) {
+          throw error; // This will be caught by the catch block and trigger a retry
         }
-        return null
-      }
 
-      console.log('✅ Profile fetched:', { email: profile.email, role: profile.role })
-      return profile
-    } catch (error: any) {
-      console.error('❌ Profile fetch exception:', error.message)
-      return null
+        console.log('✅ Profile fetched:', { email: profile.email, role: profile.role });
+        return profile;
+
+      } catch (error: any) {
+        console.warn(`Attempt ${i + 1} failed: ${error.message}`);
+        if (i === MAX_RETRIES - 1) { // If this was the last retry
+          console.error('❌ Profile fetch failed after all retries.');
+          setState(prev => ({ ...prev, error: 'Failed to connect to the database. The server is not responding. Please try again later.' }));
+          return null;
+        }
+        // Wait 1 second before the next retry
+        await new Promise(res => setTimeout(res, 1000));
+      }
     }
-  }, [supabase])
+    return null;
+  }, [supabase]);
 
   // Initialize authentication
   useEffect(() => {
