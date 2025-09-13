@@ -1,9 +1,9 @@
 'use client'
 
-import { ClientAuthProvider, useClientAuth } from '@/contexts/client-auth-context'
+import { useAuth } from '@/contexts/auth-context'
 
 function AuthDebugContent() {
-  const { user, profile, loading, error } = useClientAuth()
+  const { user, profile, loading, error } = useAuth()
   
   return (
     <div className="p-8 max-w-4xl mx-auto">
@@ -44,8 +44,6 @@ function AuthDebugContent() {
 
 export default function TestClientAuthPage() {
   return (
-    <ClientAuthProvider>
-      <AuthDebugContent />
-    </ClientAuthProvider>
+    <AuthDebugContent />
   )
 }

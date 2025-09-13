@@ -78,6 +78,10 @@ RETURNS TEXT AS $$
 DECLARE
     user_role TEXT;
 BEGIN
+    IF user_id IS NULL THEN
+        RETURN 'anon';
+    END IF;
+    
     SELECT role INTO user_role 
     FROM profiles 
     WHERE id = user_id;
@@ -188,7 +192,9 @@ CREATE POLICY "Enhanced bookings read policy" ON bookings
 CREATE POLICY "Enhanced bookings create policy" ON bookings
     FOR INSERT WITH CHECK (
         -- Must be authenticated and booking for themselves
-        auth.uid() = user_id
+        auth.uid() = user_id AND
+        -- Check event capacity before booking
+        check_event_capacity(event_id, quantity)
     );
 
 CREATE POLICY "Enhanced bookings update policy" ON bookings
@@ -260,7 +266,8 @@ CREATE POLICY "Enhanced payments update policy" ON payments
             SELECT id FROM bookings WHERE user_id = auth.uid()
         ) OR
         -- System can update (for webhook processing)
-        current_setting('role') = 'service_role'
+        current_setting('role') = 'service_role' OR
+        is_admin()
     );
 
 -- =====================================================
@@ -397,18 +404,25 @@ RETURNS BOOLEAN AS $$
 DECLARE
     max_capacity INTEGER;
     current_bookings INTEGER;
+    available_tickets INTEGER;
 BEGIN
-    SELECT max_attendees INTO max_capacity
-    FROM events
-    WHERE id = event_id;
+    -- Get max capacity and current bookings
+    SELECT 
+        e.max_attendees,
+        COALESCE(SUM(b.quantity), 0)
+    INTO 
+        max_capacity,
+        current_bookings
+    FROM events e
+    LEFT JOIN bookings b ON e.id = b.event_id
+    WHERE e.id = event_id
+    AND b.booking_status = 'confirmed'
+    AND b.payment_status = 'completed'
+    GROUP BY e.max_attendees;
     
-    SELECT COALESCE(SUM(quantity), 0) INTO current_bookings
-    FROM bookings
-    WHERE event_id = check_event_capacity.event_id 
-    AND booking_status = 'confirmed'
-    AND payment_status = 'completed';
+    available_tickets := max_capacity - current_bookings;
     
-    RETURN (current_bookings + requested_quantity) <= max_capacity;
+    RETURN requested_quantity <= available_tickets;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 

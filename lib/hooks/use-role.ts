@@ -1,74 +1,35 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { useAuth } from '@/contexts/auth-context'
 import { UserRole, RoleBasedPermissions, UserEventStats } from '@/types'
 import { User } from '@supabase/supabase-js'
+import { createClient } from '@/lib/supabase/client'
+import { useState, useEffect } from 'react'
 
-export function useUserRole(user?: User | null) {
-  const [role, setRole] = useState<UserRole>('user')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!user) {
-      setRole('user')
-      setLoading(false)
-      return
-    }
-
-    const fetchUserRole = async () => {
-      try {
-        setLoading(true)
-        setError(null)
-        const supabase = createClient()
-        
-        // First try to get from profiles table directly
-        const { data: profile, error: profileError } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single()
-
-        if (profileError) {
-          console.warn('Profile not found, defaulting to user role:', profileError)
-          setRole('user')
-        } else {
-          setRole(profile?.role || 'user')
-        }
-      } catch (err) {
-        console.error('Error fetching user role:', err)
-        setError(err instanceof Error ? err.message : 'Failed to fetch user role')
-        setRole('user') // Default to user role on error
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchUserRole()
-  }, [user?.id]) // Only depend on user.id to prevent unnecessary re-renders
-
-  return { role, loading, error }
+export function useUserRole() {
+  const { profile, loading } = useAuth()
+  return { role: profile?.role || 'user', loading }
 }
 
-export function useRolePermissions(role: UserRole): RoleBasedPermissions {
+export function useRolePermissions(role?: UserRole): RoleBasedPermissions {
+  const effectiveRole = role || 'user'
   return {
-    canCreateEvents: role === 'organizer' || role === 'admin',
-    canManageAllEvents: role === 'admin',
-    canViewAllBookings: role === 'admin',
-    canManageUsers: role === 'admin',
-    canViewAnalytics: role === 'organizer' || role === 'admin',
-    canPromoteUsers: role === 'admin'
+    canCreateEvents: effectiveRole === 'organizer' || effectiveRole === 'admin',
+    canManageAllEvents: effectiveRole === 'admin',
+    canViewAllBookings: effectiveRole === 'admin',
+    canManageUsers: effectiveRole === 'admin',
+    canViewAnalytics: effectiveRole === 'organizer' || effectiveRole === 'admin',
+    canPromoteUsers: effectiveRole === 'admin'
   }
 }
 
-export function useIsAdmin(user?: User | null) {
-  const { role, loading } = useUserRole(user)
+export function useIsAdmin() {
+  const { role, loading } = useUserRole()
   return { isAdmin: role === 'admin', loading }
 }
 
-export function useIsOrganizerOrAdmin(user?: User | null) {
-  const { role, loading } = useUserRole(user)
+export function useIsOrganizerOrAdmin() {
+  const { role, loading } = useUserRole()
   return { isOrganizerOrAdmin: role === 'organizer' || role === 'admin', loading }
 }
 

@@ -116,6 +116,44 @@ export default function DebugRolePage() {
     }
   }
 
+  const fixProfile = async () => {
+    try {
+      const response = await fetch('/api/debug/fix-user-profile')
+      const data = await response.json()
+      
+      if (response.ok) {
+        alert(`Profile fixed: ${data.message}`)
+        setTimeout(() => window.location.reload(), 1000)
+      } else {
+        alert(`Fix failed: ${data.error}`)
+      }
+    } catch (error) {
+      alert(`Error: ${error}`)
+    }
+  }
+
+  const recreateProfile = async (role: string) => {
+    if (!confirm('This will delete and recreate your profile. Continue?')) return
+    
+    try {
+      const response = await fetch('/api/debug/fix-user-profile', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'force_create', role })
+      })
+      const data = await response.json()
+      
+      if (response.ok) {
+        alert(`Profile recreated as ${role}. Refreshing...`)
+        setTimeout(() => window.location.reload(), 1000)
+      } else {
+        alert(`Recreation failed: ${data.error}`)
+      }
+    } catch (error) {
+      alert(`Error: ${error}`)
+    }
+  }
+
   if (loading) {
     return <div className="p-8">Loading debug information...</div>
   }
@@ -127,7 +165,7 @@ export default function DebugRolePage() {
       <div className="space-y-4">
         <div className="bg-white p-4 rounded-lg shadow">
           <h2 className="font-bold text-lg mb-2">Quick Actions</h2>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               onClick={refreshRole}
               className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
@@ -145,6 +183,18 @@ export default function DebugRolePage() {
               className="px-4 py-2 bg-gray-500 text-white rounded hover:bg-gray-600"
             >
               Force Set User
+            </button>
+            <button
+              onClick={fixProfile}
+              className="px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+            >
+              Fix Profile Issues
+            </button>
+            <button
+              onClick={() => recreateProfile('admin')}
+              className="px-4 py-2 bg-purple-500 text-white rounded hover:bg-purple-600"
+            >
+              Recreate as Admin
             </button>
           </div>
         </div>

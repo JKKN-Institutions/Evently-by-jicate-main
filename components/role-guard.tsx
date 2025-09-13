@@ -1,7 +1,6 @@
 'use client'
 
 import { ReactNode } from 'react'
-import { useUser } from '@supabase/auth-helpers-react'
 import { useUserRole, useIsAdmin, useIsOrganizerOrAdmin } from '@/lib/hooks/use-role'
 import { UserRole } from '@/types'
 
@@ -22,10 +21,9 @@ export function RoleGuard({
   fallback = null,
   loading = <div className="animate-pulse">Loading...</div>
 }: RoleGuardProps) {
-  const user = useUser()
-  const { role, loading: roleLoading } = useUserRole(user)
-  const { isAdmin, loading: adminLoading } = useIsAdmin(user)
-  const { isOrganizerOrAdmin, loading: orgAdminLoading } = useIsOrganizerOrAdmin(user)
+  const { role, loading: roleLoading } = useUserRole()
+  const { isAdmin, loading: adminLoading } = useIsAdmin()
+  const { isOrganizerOrAdmin, loading: orgAdminLoading } = useIsOrganizerOrAdmin()
 
   // Show loading state
   if (roleLoading || adminLoading || orgAdminLoading) {
@@ -60,10 +58,9 @@ interface RoleBasedRenderProps {
 }
 
 export function RoleBasedRender({ children }: RoleBasedRenderProps) {
-  const user = useUser()
-  const { role, loading: roleLoading } = useUserRole(user)
-  const { isAdmin, loading: adminLoading } = useIsAdmin(user)
-  const { isOrganizerOrAdmin, loading: orgAdminLoading } = useIsOrganizerOrAdmin(user)
+  const { role, loading: roleLoading } = useUserRole()
+  const { isAdmin, loading: adminLoading } = useIsAdmin()
+  const { isOrganizerOrAdmin, loading: orgAdminLoading } = useIsOrganizerOrAdmin()
 
   const loading = roleLoading || adminLoading || orgAdminLoading
 
