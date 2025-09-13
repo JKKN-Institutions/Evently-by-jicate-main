@@ -645,7 +645,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, 30000) // Check every 30 seconds
     
     return () => clearInterval(intervalId)
-  }, [state.user?.id]) // Only re-setup when user ID changes
+  }, [state.user?.id, state.profile?.role, state.loading, supabase, isDev]) // Include all dependencies
 
   // Set up realtime subscription for profile changes
   useEffect(() => {

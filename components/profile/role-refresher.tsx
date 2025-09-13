@@ -1,13 +1,14 @@
 'use client'
 
-import { useAuth } from '@/contexts/AuthContext'
+import { useAuth } from '@/contexts/auth-context'
 import { Button } from '@/components/ui/button'
 import { RefreshCw, Shield } from 'lucide-react'
 import { useState } from 'react'
 
 export function RoleRefresher() {
-  const { role, refreshProfile, forceRefresh } = useAuth()
+  const { profile, refreshProfile } = useAuth()
   const [isRefreshing, setIsRefreshing] = useState(false)
+  const role = profile?.role || 'user'
 
   const handleRefresh = async () => {
     setIsRefreshing(true)
