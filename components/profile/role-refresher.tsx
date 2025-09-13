@@ -1,7 +1,7 @@
 'use client'
 
 import { useAuth } from '@/contexts/auth-context'
-import { Button } from '@/components/ui/button'
+import { MagicalButton } from '@/components/ui/magical-button'
 import { RefreshCw, Shield } from 'lucide-react'
 import { useState } from 'react'
 
@@ -54,16 +54,16 @@ export function RoleRefresher() {
           {role.toUpperCase()}
         </span>
       </div>
-      <Button
+      <MagicalButton
         onClick={handleRefresh}
-        variant="outline"
+        variant="secondary"
         size="sm"
         disabled={isRefreshing}
         className="flex items-center gap-2"
       >
         <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} />
         {isRefreshing ? 'Refreshing...' : 'Refresh Role'}
-      </Button>
+      </MagicalButton>
     </div>
   )
 }
