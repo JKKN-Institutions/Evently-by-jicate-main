@@ -124,8 +124,47 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setState({ user: null, profile: null, loading: false, error: null })
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
         if (session?.user) {
-          const profile = await fetchUserProfile(session.user.id)
-          setState({ user: session.user, profile, loading: false, error: null })
+          // Only fetch profile if we don't already have one for this user
+          setState(prevState => {
+            if (prevState.user?.id === session.user.id && prevState.profile) {
+              // We already have the profile for this user, just update the user session
+              return { ...prevState, user: session.user, loading: false, error: null }
+            } else {
+              // We need to fetch the profile
+              fetchUserProfile(session.user.id).then(profile => {
+                setState(currentState => ({
+                  ...currentState,
+                  user: session.user,
+                  profile,
+                  loading: false,
+                  error: null
+                }))
+              })
+              return { ...prevState, user: session.user, loading: true }
+            }
+          })
+        }
+      } else if (event === 'INITIAL_SESSION') {
+        // Handle initial session - this is fired when the page loads with an existing session
+        if (session?.user) {
+          setState(prevState => {
+            if (prevState.user?.id === session.user.id && prevState.profile) {
+              // We already have the profile, no need to fetch again
+              return { ...prevState, user: session.user, loading: false, error: null }
+            } else {
+              // We need to fetch the profile
+              fetchUserProfile(session.user.id).then(profile => {
+                setState(currentState => ({
+                  ...currentState,
+                  user: session.user,
+                  profile,
+                  loading: false,
+                  error: null
+                }))
+              })
+              return { ...prevState, user: session.user, loading: true }
+            }
+          })
         }
       }
     })
