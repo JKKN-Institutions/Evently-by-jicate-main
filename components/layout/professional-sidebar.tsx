@@ -34,7 +34,6 @@ import {
 import React, { useState, useEffect, useMemo } from 'react'
 import { useAuth } from '@/contexts/auth-context'
 import { getNavigationForRole, getNavigationForRoleAsync, hasRole } from '@/lib/auth-helpers'
-import { isAdminEmail } from '@/lib/config/admin-emails'
 import { createClient } from '@/lib/supabase/client'
 import Footer from './footer'
 
@@ -101,40 +100,24 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
 
   // Derive an effective role quickly to avoid flashing user menu for admins
   // If we have a user but no profile yet, check if they're admin by email
-  // Enhanced admin detection for production reliability
+  // Use database role ONLY - no email-based overrides
   const effectiveRole = useMemo(() => {
-    // First priority: database profile role
+    // ONLY use database profile role
     if (profile?.role) return profile.role
     
-    // Second priority: admin email check
-    if (user?.email && isAdminEmail(user.email)) {
-      if (process.env.NODE_ENV === 'development') console.log('🔧 ADMIN: Detected admin by email:', user.email)
-      return 'admin'
-    }
-    
-    // Third priority: fallback for specific admin emails (production safety)
-    if (user?.email === 'sroja@jkkn.ac.in' || user?.email === 'director@jkkn.ac.in') {
-      if (process.env.NODE_ENV === 'development') console.log('🔧 ADMIN: Force-detected admin by hardcoded email:', user.email)
-      return 'admin'
-    }
-    
-    // Default: no role determined yet
+    // Default: no role determined yet (wait for database)
     return null
-  }, [profile?.role, user?.email])
+  }, [profile?.role])
   
-  // Enhanced debug logging for production admin detection
-  if (process.env.NODE_ENV === 'development' && (user?.email === 'sroja@jkkn.ac.in' || user?.email === 'director@jkkn.ac.in')) {
-    console.log('🔧 PRODUCTION ADMIN DEBUG:', {
+  // Debug logging for role detection
+  if (process.env.NODE_ENV === 'development' && user?.email) {
+    console.log('🔧 ROLE DEBUG:', {
       userEmail: user.email,
       profileRole: profile?.role,
       effectiveRole,
-      isAdminEmail: isAdminEmail(user.email),
       profileExists: !!profile,
-      environment: process.env.NODE_ENV,
-      adminEmails: ['director@jkkn.ac.in', 'sroja@jkkn.ac.in'],
       userAuthenticated: !!user,
-      loadingState: loading,
-      supabaseConnected: !!supabase
+      loadingState: loading
     })
   }
   
@@ -151,7 +134,7 @@ export default function ProfessionalSidebar({ children }: ModernSidebarProps) {
   if (process.env.NODE_ENV === 'development') {
     console.log('ProfessionalSidebar - Profile:', profile)
     console.log('ProfessionalSidebar - User email:', user?.email)
-    console.log('ProfessionalSidebar - Is admin email?:', user?.email ? isAdminEmail(user.email) : 'no email')
+    console.log('ProfessionalSidebar - Database Role Only:', profile?.role)
     console.log('ProfessionalSidebar - Profile Role:', profile?.role, 'Effective Role:', effectiveRole)
   }
   

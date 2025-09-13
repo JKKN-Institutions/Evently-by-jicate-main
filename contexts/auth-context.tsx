@@ -3,7 +3,6 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react'
 import { createClient, resetClient } from '@/lib/supabase/client'
 import { User } from '@supabase/supabase-js'
-import { isAdminEmail } from '@/lib/config/admin-emails'
 
 interface UserProfile {
   id: string
@@ -314,8 +313,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // If no profile exists, create one
       if (!profile) {
         if (isDev) console.log('📝 No profile found, creating new profile...')
-        // Check if this email should be an admin
-        const userRole = isAdminEmail(session.user.email) ? 'admin' : 'user'
+        // Don't automatically assign admin - let it be set in database manually
+        const userRole = 'user'
         if (isDev) console.log('👑 User role determined:', userRole)
         
         const { data: newProfile, error: createError } = await supabase
